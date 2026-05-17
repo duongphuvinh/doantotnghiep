@@ -58,7 +58,11 @@ def _extract_pdf(content: bytes) -> str:
         raise UnsupportedLabFileError("PDF support requires pymupdf")
     try:
         document = fitz.open(stream=content, filetype="pdf")
-        pages = [document.load_page(i).get_text("text") for i in range(document.page_count)]
+        pages = []
+        for i in range(document.page_count):
+            page = document.load_page(i)
+            table_text = _extract_pdf_page_rows(page)
+            pages.append(table_text or page.get_text("text"))
         document.close()
     except Exception as exc:
         raise UnsupportedLabFileError(f"Không đọc được PDF: {exc}") from exc
@@ -67,6 +71,33 @@ def _extract_pdf(content: bytes) -> str:
     if not text.strip():
         raise UnsupportedLabFileError("PDF không có text để trích xuất. Nếu là ảnh scan, cần thêm OCR.")
     return text
+
+
+def _extract_pdf_page_rows(page) -> str:
+    words = page.get_text("words")
+    if not words:
+        return ""
+
+    rows: list[list[tuple[float, float, str]]] = []
+    for word in sorted(words, key=lambda item: (round(item[1], 1), item[0])):
+        x0, y0, _x1, _y1, text = word[:5]
+        clean = str(text).strip()
+        if not clean:
+            continue
+        for row in rows:
+            if abs(row[0][1] - y0) <= 3.0:
+                row.append((x0, y0, clean))
+                break
+        else:
+            rows.append([(x0, y0, clean)])
+
+    lines: list[str] = []
+    for row in rows:
+        pieces = [word for _x, _y, word in sorted(row, key=lambda item: item[0])]
+        line = " ".join(pieces).strip()
+        if line:
+            lines.append(line)
+    return "\n".join(lines)
 
 
 def _extract_xlsx(content: bytes) -> str:
@@ -85,4 +116,3 @@ def _extract_xlsx(content: bytes) -> str:
                 lines.append(" ".join(cells))
     workbook.close()
     return "\n".join(lines)
-

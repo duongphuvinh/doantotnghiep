@@ -1,6 +1,8 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+import { normalizeLabAnalyzeResponse } from "@/lib/lab-result-normalizer";
+
 const DEFAULT_BACKEND_URL = "http://localhost:8000";
 
 export async function POST(req: Request) {
@@ -26,6 +28,9 @@ export async function POST(req: Request) {
 
     const contentType = response.headers.get("content-type") || "application/json";
     const body = await response.text();
+    if (response.ok && contentType.includes("application/json")) {
+      return Response.json(normalizeLabAnalyzeResponse(JSON.parse(body)), { status: response.status });
+    }
 
     return new Response(body, {
       status: response.status,
@@ -44,4 +49,3 @@ export async function POST(req: Request) {
     );
   }
 }
-

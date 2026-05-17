@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Beaker,
   CheckCircle2,
+  ClipboardCheck,
   FlaskConical,
   Loader2,
   Plus,
@@ -27,6 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { normalizeLabAnalyzeResponse } from "@/lib/lab-result-normalizer";
 import { getMedicalAuthToken, getMedicalAuthUser, type MedicalUser } from "@/lib/medical-auth";
 import { cn } from "@/lib/utils";
 
@@ -59,6 +61,8 @@ type LabAnalyzeResponse = {
   urgent_count: number;
   recommended_next_steps: string[];
   safety_note: string;
+  raw_text_preview?: string | null;
+  unrecognized_lines?: string[];
 };
 
 const commonBlood = [
@@ -109,9 +113,10 @@ export function LabResultsReader() {
   }, []);
 
   const abnormalItems = useMemo(
-    () => result?.items.filter((item) => !["normal", "negative"].includes(item.status)) ?? [],
+    () => result?.items.filter((item) => ["low", "high", "positive", "abnormal"].includes(item.status)) ?? [],
     [result]
   );
+  const conclusion = useMemo(() => (result ? buildLabConclusion(result) : null), [result]);
 
   const addRow = (category: LabCategory) => {
     const [name, unit] = category === "blood" ? commonBlood[0] : commonUrine[0];
@@ -179,7 +184,7 @@ export function LabResultsReader() {
       if (!response.ok) {
         throw new Error(data?.detail || "Không đọc được kết quả xét nghiệm");
       }
-      setResult(data);
+      setResult(normalizeLabAnalyzeResponse(data) as LabAnalyzeResponse);
       toast.success("Đã đọc kết quả xét nghiệm");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Có lỗi khi đọc xét nghiệm");
@@ -228,7 +233,7 @@ export function LabResultsReader() {
       if (!response.ok) {
         throw new Error(data?.detail || "Không đọc được file xét nghiệm");
       }
-      setResult(data);
+      setResult(normalizeLabAnalyzeResponse(data) as LabAnalyzeResponse);
       toast.success("Đã đọc file xét nghiệm");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Có lỗi khi upload file xét nghiệm");
@@ -409,6 +414,27 @@ export function LabResultsReader() {
                   </Badge>
                 </div>
 
+                {conclusion && (
+                  <div className={cn("rounded-md border p-4 text-sm", conclusion.className)}>
+                    <div className="flex items-start gap-3">
+                      <ClipboardCheck className="mt-0.5 h-5 w-5 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium uppercase tracking-wide opacity-80">Nhận xét tham khảo</div>
+                        <h3 className="mt-1 text-base font-semibold">{conclusion.title}</h3>
+                        <p className="mt-2 leading-6">{conclusion.description}</p>
+                      </div>
+                    </div>
+                    {conclusion.points.length > 0 && (
+                      <ul className="mt-3 list-disc space-y-1 pl-8 text-xs leading-5">
+                        {conclusion.points.map((point) => (
+                          <li key={point}>{point}</li>
+                        ))}
+                      </ul>
+                    )}
+                    <p className="mt-3 border-t border-current/20 pt-3 text-xs leading-5 opacity-85">{result.safety_note}</p>
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   {result.items.map((item, index) => (
                     <div key={`${item.code}-${index}`} className="rounded-md border border-border/60 bg-muted/15 p-3">
@@ -442,6 +468,27 @@ export function LabResultsReader() {
                     </ul>
                   </div>
                 )}
+
+                {(result.unrecognized_lines?.length || result.raw_text_preview) && (
+                  <details className="rounded-md border border-border/60 bg-muted/15 p-3 text-sm">
+                    <summary className="cursor-pointer font-medium">Kiểm tra nội dung PDF đã đọc</summary>
+                    {result.unrecognized_lines?.length ? (
+                      <div className="mt-3">
+                        <div className="text-xs font-medium text-muted-foreground">Dòng có vẻ là kết quả nhưng chưa nhận diện</div>
+                        <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-muted-foreground">
+                          {result.unrecognized_lines.slice(0, 12).map((line, index) => (
+                            <li key={`${line}-${index}`}>{line}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {result.raw_text_preview ? (
+                      <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border/60 bg-background/70 p-3 text-xs leading-5 text-muted-foreground">
+                        {result.raw_text_preview}
+                      </pre>
+                    ) : null}
+                  </details>
+                )}
               </div>
             )}
           </section>
@@ -458,11 +505,76 @@ function StatusBadge({ status, severity }: { status: string; severity: string })
       : severity === "attention"
         ? "border-amber-200 bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-200"
         : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-200";
+  const label =
+    status === "low"
+      ? "thấp"
+      : status === "normal"
+        ? "bình thường"
+        : status === "high"
+          ? "cao"
+          : status === "positive"
+            ? "dương tính"
+            : status === "negative"
+              ? "âm tính"
+              : status === "unknown"
+                ? "chưa rõ"
+                : status;
   return (
     <Badge variant="outline" className={cls}>
-      {status}
+      {label}
     </Badge>
   );
+}
+
+function buildLabConclusion(result: LabAnalyzeResponse) {
+  const urgentItems = result.items.filter((item) => item.severity === "urgent");
+  const abnormalItems = result.items.filter((item) => ["low", "high", "positive", "abnormal"].includes(item.status));
+  const topItems = abnormalItems.slice(0, 3).map((item) => `${item.name}: ${String(item.value)} ${item.unit || ""}`.trim());
+
+  if (result.items.length === 0) {
+    return {
+      title: "Chưa đủ dữ liệu xét nghiệm để đưa ra nhận xét.",
+      description: "Hệ thống chưa nhận diện được chỉ số có trong bảng tham chiếu. Nên kiểm tra lại file PDF có phải dạng scan ảnh không, hoặc dán thủ công các dòng chỉ số quan trọng.",
+      points: result.recommended_next_steps.slice(0, 2),
+      className: "border-slate-200 bg-slate-50 text-slate-800 dark:border-slate-700/50 dark:bg-slate-900/30 dark:text-slate-100",
+    };
+  }
+
+  if (urgentItems.length > 0) {
+    return {
+      title: "Có chỉ số lệch nhiều, nên được đánh giá y tế sớm.",
+      description: `Hệ thống nhận diện ${result.items.length} chỉ số và có ${urgentItems.length} chỉ số ở mức cần chú ý cao. Đây là nhận xét hỗ trợ đọc phiếu, chưa thay thế kết luận của bác sĩ.`,
+      points: [
+        ...topItems,
+        "Ưu tiên đối chiếu ngay với khoảng tham khảo in trên phiếu gốc và triệu chứng hiện tại.",
+        "Nếu có biểu hiện nặng hoặc chỉ số lệch rất nhiều, nên khám trực tiếp thay vì chỉ theo dõi trên phần mềm.",
+      ],
+      className: "border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-700/40 dark:bg-rose-900/20 dark:text-rose-100",
+    };
+  }
+
+  if (abnormalItems.length > 0) {
+    return {
+      title: "Có một số chỉ số ngoài khoảng tham khảo.",
+      description: `Hệ thống nhận diện ${result.items.length} chỉ số, trong đó ${abnormalItems.length} chỉ số lệch so với khoảng tham khảo đang dùng. Cần xem cùng tuổi, giới, tình trạng nhịn ăn, thuốc đang dùng và bệnh nền.`,
+      points: [
+        ...topItems,
+        "Nhóm đường-mỡ máu nên đối chiếu tình trạng nhịn ăn và nguy cơ tim mạch.",
+        "Nhóm gan-thận-điện giải nên đối chiếu triệu chứng và các kết quả liên quan trên cùng phiếu.",
+      ],
+      className: "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-100",
+    };
+  }
+
+  return {
+    title: "Các chỉ số đã đọc chưa ghi nhận bất thường rõ.",
+    description: `Hệ thống nhận diện ${result.items.length} chỉ số và chưa thấy chỉ số nào lệch rõ theo khoảng tham khảo đang dùng. Kết quả vẫn cần đối chiếu với phiếu gốc vì mỗi phòng xét nghiệm có khoảng tham chiếu riêng.`,
+    points: [
+      "Nếu phiếu gốc còn nhiều chỉ số nhưng phần mềm đọc ít, nên dùng PDF có text rõ hoặc dán nội dung bảng xét nghiệm vào ô nhập.",
+      ...result.recommended_next_steps.slice(0, 1),
+    ],
+    className: "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-700/40 dark:bg-emerald-900/20 dark:text-emerald-100",
+  };
 }
 
 function coerceValue(value: string) {

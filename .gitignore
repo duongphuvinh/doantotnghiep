@@ -79,6 +79,7 @@ logs/
 *.pt
 *.pth
 *.onnx
-medical-image-backend/models/
+medical-image-backend/models/*
+!medical-image-backend/models/lab_reference_nhanes.json
 medical-image-backend/uploads/
 medical-image-backend/data/

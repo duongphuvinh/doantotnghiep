@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { BarChart3, BrainCircuit, FlaskConical, ImageUp, LogIn, MessageSquare, PlusCircle, Trash2, ServerIcon, Settings, Sparkles, ChevronsUpDown, Copy, Pencil, Github, Key } from "lucide-react";
+import { BarChart3, BrainCircuit, FlaskConical, ImageUp, LogIn, LogOut, MessageSquare, PlusCircle, Trash2, ServerIcon, Settings, Sparkles, ChevronsUpDown, Copy, Pencil, Github, Key } from "lucide-react";
 import {
     Sidebar,
     SidebarContent,
@@ -26,6 +26,7 @@ import { MCPServerManager } from "./mcp-server-manager";
 import { ApiKeyManager } from "./api-key-manager";
 import { ThemeToggle } from "./theme-toggle";
 import { getUserId, updateUserId } from "@/lib/user-id";
+import { clearMedicalAuthSession, getMedicalAuthUser, type MedicalUser } from "@/lib/medical-auth";
 import { useChats } from "@/lib/hooks/use-chats";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -63,6 +64,7 @@ export function ChatSidebar() {
     const isCollapsed = state === "collapsed";
     const [editUserIdOpen, setEditUserIdOpen] = useState(false);
     const [newUserId, setNewUserId] = useState('');
+    const [medicalUser, setMedicalUser] = useState<MedicalUser | null>(null);
 
     // Get MCP server data from context
     const { mcpServers, setMcpServers, selectedMcpServers, setSelectedMcpServers } = useMCP();
@@ -70,6 +72,17 @@ export function ChatSidebar() {
     // Initialize userId
     useEffect(() => {
         setUserId(getUserId());
+    }, []);
+
+    useEffect(() => {
+        const refreshMedicalUser = () => setMedicalUser(getMedicalAuthUser());
+        refreshMedicalUser();
+        window.addEventListener("medical-auth-changed", refreshMedicalUser);
+        window.addEventListener("storage", refreshMedicalUser);
+        return () => {
+            window.removeEventListener("medical-auth-changed", refreshMedicalUser);
+            window.removeEventListener("storage", refreshMedicalUser);
+        };
     }, []);
     
     // Use TanStack Query to fetch chats
@@ -86,6 +99,15 @@ export function ChatSidebar() {
 
     const handleMedicalLogin = () => {
         router.push('/medical-login');
+    };
+
+    const handleMedicalLogout = () => {
+        clearMedicalAuthSession();
+        setMedicalUser(null);
+        toast.success("Đã đăng xuất");
+        if (pathname === "/medical-login") {
+            router.refresh();
+        }
     };
 
     const handleLabResults = () => {
@@ -368,6 +390,7 @@ export function ChatSidebar() {
                         </Button>
                     </motion.div>
 
+                    {!medicalUser && (
                     <motion.div
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
@@ -385,17 +408,18 @@ export function ChatSidebar() {
                             {!isCollapsed && <span>Đăng nhập</span>}
                         </Button>
                     </motion.div>
-                    
+                    )}
+                    {medicalUser && (
                     <DropdownMenu modal={false}>
                         <DropdownMenuTrigger asChild>
                             {isCollapsed ? (
                                 <Button
-                                    variant="ghost"
+                                    variant={pathname === "/medical-login" ? "secondary" : "outline"}
                                     className="w-8 h-8 p-0 flex items-center justify-center"
                                 >
                                     <Avatar className="h-6 w-6 rounded-lg bg-secondary/60">
                                         <AvatarFallback className="rounded-lg text-xs font-medium text-secondary-foreground">
-                                            {userId.substring(0, 2).toUpperCase()}
+                                            {(medicalUser.full_name || medicalUser.username).substring(0, 2).toUpperCase()}
                                         </AvatarFallback>
                                     </Avatar>
                                 </Button>
@@ -407,12 +431,12 @@ export function ChatSidebar() {
                                     <div className="flex items-center gap-2">
                                         <Avatar className="h-7 w-7 rounded-lg bg-secondary/60">
                                             <AvatarFallback className="rounded-lg text-sm font-medium text-secondary-foreground">
-                                                {userId.substring(0, 2).toUpperCase()}
+                                                {(medicalUser.full_name || medicalUser.username).substring(0, 2).toUpperCase()}
                                             </AvatarFallback>
                                         </Avatar>
                                         <div className="grid text-left text-sm leading-tight">
-                                            <span className="truncate font-medium text-foreground/90">User ID</span>
-                                            <span className="truncate text-xs text-muted-foreground">{userId.substring(0, 16)}...</span>
+                                            <span className="truncate font-medium text-foreground/90">{medicalUser.full_name || medicalUser.username}</span>
+                                            <span className="truncate text-xs text-muted-foreground">{medicalUser.role}</span>
                                         </div>
                                     </div>
                                     <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
@@ -429,17 +453,21 @@ export function ChatSidebar() {
                                 <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
                                     <Avatar className="h-8 w-8 rounded-lg bg-secondary/60">
                                         <AvatarFallback className="rounded-lg text-sm font-medium text-secondary-foreground">
-                                            {userId.substring(0, 2).toUpperCase()}
+                                            {(medicalUser.full_name || medicalUser.username).substring(0, 2).toUpperCase()}
                                         </AvatarFallback>
                                     </Avatar>
                                     <div className="grid flex-1 text-left text-sm leading-tight">
-                                        <span className="truncate font-semibold text-foreground/90">User ID</span>
-                                        <span className="truncate text-xs text-muted-foreground">{userId}</span>
+                                        <span className="truncate font-semibold text-foreground/90">{medicalUser.full_name || medicalUser.username}</span>
+                                        <span className="truncate text-xs text-muted-foreground">@{medicalUser.username}</span>
                                     </div>
                                 </div>
                             </DropdownMenuLabel>
-                          
+                            <DropdownMenuSeparator />
                             <DropdownMenuGroup>
+                                <DropdownMenuItem onSelect={handleMedicalLogin}>
+                                    <LogIn className="mr-2 h-4 w-4" />
+                                    Trang tài khoản
+                                </DropdownMenuItem>
                                 <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
                                     <div className="flex items-center justify-between w-full">
                                         <div className="flex items-center">
@@ -449,9 +477,14 @@ export function ChatSidebar() {
                                         <ThemeToggle className="h-6 w-6" />
                                     </div>
                                 </DropdownMenuItem>
+                                <DropdownMenuItem onSelect={handleMedicalLogout} className="text-destructive focus:text-destructive">
+                                    <LogOut className="mr-2 h-4 w-4" />
+                                    Đăng xuất
+                                </DropdownMenuItem>
                             </DropdownMenuGroup>
                         </DropdownMenuContent>
                     </DropdownMenu>
+                    )}
                 </div>
                 
                 <MCPServerManager

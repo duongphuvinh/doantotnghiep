@@ -162,6 +162,10 @@ class LabValueInput(BaseModel):
     value: str | int | float | bool
     unit: str | None = Field(default=None, max_length=40)
     category: LabCategory | None = None
+    reference_low: float | None = None
+    reference_high: float | None = None
+    reference_unit: str | None = Field(default=None, max_length=40)
+    reference_range_source: str | None = Field(default=None, max_length=120)
 
 
 class LabAnalyzeRequest(BaseModel):
@@ -191,6 +195,8 @@ class LabAnalyzeResponse(BaseModel):
     urgent_count: int
     recommended_next_steps: list[str]
     safety_note: str
+    raw_text_preview: str | None = None
+    unrecognized_lines: list[str] = Field(default_factory=list)
 
 
 class FusionSignal(BaseModel):
