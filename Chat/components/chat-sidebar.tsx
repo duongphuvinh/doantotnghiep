@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { MessageSquare, PlusCircle, Trash2, ServerIcon, Settings, Sparkles, ChevronsUpDown, Copy, Pencil, Github, Key } from "lucide-react";
+import { BarChart3, BrainCircuit, FlaskConical, ImageUp, LogIn, MessageSquare, PlusCircle, Trash2, ServerIcon, Settings, Sparkles, ChevronsUpDown, Copy, Pencil, Github, Key } from "lucide-react";
 import {
     Sidebar,
     SidebarContent,
@@ -78,6 +78,26 @@ export function ChatSidebar() {
     // Start a new chat
     const handleNewChat = () => {
         router.push('/');
+    };
+
+    const handleMedicalImageUpload = () => {
+        router.push('/medical-images');
+    };
+
+    const handleMedicalLogin = () => {
+        router.push('/medical-login');
+    };
+
+    const handleLabResults = () => {
+        router.push('/lab-results');
+    };
+
+    const handleMultimodal = () => {
+        router.push('/multimodal');
+    };
+
+    const handleModelEvaluation = () => {
+        router.push('/model-evaluation');
     };
 
     // Delete a chat
@@ -273,6 +293,96 @@ export function ChatSidebar() {
                         >
                             <PlusCircle className={`${isCollapsed ? "" : "mr-2"} h-4 w-4`} />
                             {!isCollapsed && <span>New Chat</span>}
+                        </Button>
+                    </motion.div>
+
+                    <motion.div
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                    >
+                        <Button
+                            variant={pathname === "/medical-images" ? "secondary" : "outline"}
+                            className={cn(
+                                "w-full",
+                                isCollapsed ? "w-8 h-8 p-0" : ""
+                            )}
+                            onClick={handleMedicalImageUpload}
+                            title={isCollapsed ? "Upload phim xương" : undefined}
+                        >
+                            <ImageUp className={`${isCollapsed ? "" : "mr-2"} h-4 w-4`} />
+                            {!isCollapsed && <span>Upload phim</span>}
+                        </Button>
+                    </motion.div>
+
+                    <motion.div
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                    >
+                        <Button
+                            variant={pathname === "/lab-results" ? "secondary" : "outline"}
+                            className={cn(
+                                "w-full",
+                                isCollapsed ? "w-8 h-8 p-0" : ""
+                            )}
+                            onClick={handleLabResults}
+                            title={isCollapsed ? "Xét nghiệm" : undefined}
+                        >
+                            <FlaskConical className={`${isCollapsed ? "" : "mr-2"} h-4 w-4`} />
+                            {!isCollapsed && <span>Xét nghiệm</span>}
+                        </Button>
+                    </motion.div>
+
+                    <motion.div
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                    >
+                        <Button
+                            variant={pathname === "/multimodal" ? "secondary" : "outline"}
+                            className={cn(
+                                "w-full",
+                                isCollapsed ? "w-8 h-8 p-0" : ""
+                            )}
+                            onClick={handleMultimodal}
+                            title={isCollapsed ? "Fusion" : undefined}
+                        >
+                            <BrainCircuit className={`${isCollapsed ? "" : "mr-2"} h-4 w-4`} />
+                            {!isCollapsed && <span>Fusion</span>}
+                        </Button>
+                    </motion.div>
+
+                    <motion.div
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                    >
+                        <Button
+                            variant={pathname === "/model-evaluation" ? "secondary" : "outline"}
+                            className={cn(
+                                "w-full",
+                                isCollapsed ? "w-8 h-8 p-0" : ""
+                            )}
+                            onClick={handleModelEvaluation}
+                            title={isCollapsed ? "Đánh giá model" : undefined}
+                        >
+                            <BarChart3 className={`${isCollapsed ? "" : "mr-2"} h-4 w-4`} />
+                            {!isCollapsed && <span>Đánh giá</span>}
+                        </Button>
+                    </motion.div>
+
+                    <motion.div
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                    >
+                        <Button
+                            variant={pathname === "/medical-login" ? "secondary" : "outline"}
+                            className={cn(
+                                "w-full",
+                                isCollapsed ? "w-8 h-8 p-0" : ""
+                            )}
+                            onClick={handleMedicalLogin}
+                            title={isCollapsed ? "Đăng nhập y tế" : undefined}
+                        >
+                            <LogIn className={`${isCollapsed ? "" : "mr-2"} h-4 w-4`} />
+                            {!isCollapsed && <span>Đăng nhập</span>}
                         </Button>
                     </motion.div>
                     

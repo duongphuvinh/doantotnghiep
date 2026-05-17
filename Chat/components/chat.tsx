@@ -14,6 +14,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { type Message as DBMessage } from "@/lib/db/schema";
 import { nanoid } from "nanoid";
 import { useMCP } from "@/lib/context/mcp-context";
+import { getMedicalAuthToken } from "@/lib/medical-auth";
 
 // Type for chat data from DB
 interface ChatData {
@@ -32,6 +33,7 @@ export default function Chat() {
   const [selectedModel, setSelectedModel] = useLocalStorage<modelID>("selectedModel", defaultModel);
   const [userId, setUserId] = useState<string>('');
   const [generatedChatId, setGeneratedChatId] = useState<string>('');
+  const [medicalAuthToken, setMedicalAuthToken] = useState<string>('');
   
   // Get MCP server data from context
   const { mcpServersForApi } = useMCP();
@@ -39,6 +41,17 @@ export default function Chat() {
   // Initialize userId
   useEffect(() => {
     setUserId(getUserId());
+  }, []);
+
+  useEffect(() => {
+    const refreshToken = () => setMedicalAuthToken(getMedicalAuthToken());
+    refreshToken();
+    window.addEventListener("medical-auth-changed", refreshToken);
+    window.addEventListener("storage", refreshToken);
+    return () => {
+      window.removeEventListener("medical-auth-changed", refreshToken);
+      window.removeEventListener("storage", refreshToken);
+    };
   }, []);
   
   // Generate a chat ID if needed
@@ -100,6 +113,7 @@ export default function Chat() {
         mcpServers: mcpServersForApi,
         chatId: chatId || generatedChatId, // Use generated ID if no chatId in URL
         userId,
+        medicalAuthToken,
       },
       experimental_throttle: 500,
       onFinish: () => {
@@ -112,7 +126,7 @@ export default function Chat() {
         toast.error(
           error.message.length > 0
             ? error.message
-            : "An error occured, please try again later.",
+            : "Có lỗi xảy ra, vui lòng thử lại sau.",
           { position: "top-center", richColors: true },
         );
       },

@@ -11,6 +11,11 @@ try:
 except Exception:  # pragma: no cover - optional runtime dependency
     pydicom = None
 
+try:
+    import fitz
+except Exception:  # pragma: no cover - optional runtime dependency
+    fitz = None
+
 
 class UnsupportedImageError(ValueError):
     pass
@@ -35,6 +40,29 @@ def _normalize_to_uint8(array: np.ndarray) -> np.ndarray:
 def read_medical_image(content: bytes, filename: str) -> tuple[np.ndarray, str, dict[str, Any]]:
     """Read a common image or DICOM file into a uint8 grayscale array."""
     lower_name = filename.lower()
+
+    if lower_name.endswith(".pdf"):
+        if fitz is None:
+            raise UnsupportedImageError("PDF support requires pymupdf")
+        try:
+            document = fitz.open(stream=content, filetype="pdf")
+            if document.page_count == 0:
+                raise UnsupportedImageError("PDF does not contain any pages")
+            page = document.load_page(0)
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            image = Image.frombytes("RGB", [pixmap.width, pixmap.height], pixmap.samples)
+            grayscale = image.convert("L")
+            metadata = {
+                "page_count": int(document.page_count),
+                "rendered_page": 1,
+                "source": "pdf-first-page",
+            }
+            document.close()
+            return np.array(grayscale, dtype=np.uint8), "pdf", metadata
+        except UnsupportedImageError:
+            raise
+        except Exception as exc:
+            raise UnsupportedImageError(f"Cannot read PDF: {exc}") from exc
 
     if lower_name.endswith((".dcm", ".dicom")):
         if pydicom is None:
@@ -67,4 +95,3 @@ def read_medical_image(content: bytes, filename: str) -> tuple[np.ndarray, str, 
 
     grayscale = image.convert("L")
     return np.array(grayscale, dtype=np.uint8), image.format or "image", {}
-

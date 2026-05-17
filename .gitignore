@@ -81,3 +81,4 @@ logs/
 *.onnx
 medical-image-backend/models/
 medical-image-backend/uploads/
+medical-image-backend/data/

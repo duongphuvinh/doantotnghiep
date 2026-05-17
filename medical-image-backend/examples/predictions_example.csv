@@ -1,0 +1,11 @@
+model_name,y_true,y_pred
+image_only,normal,normal
+image_only,fracture,normal
+image_only,arthritis,arthritis
+clinical_only,normal,normal
+clinical_only,fracture,fracture
+clinical_only,arthritis,normal
+multimodal,normal,normal
+multimodal,fracture,fracture
+multimodal,arthritis,arthritis
+

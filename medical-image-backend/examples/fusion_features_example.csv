@@ -1,0 +1,5 @@
+image_bone_area,image_edge_density,image_quality_warning_count,age,pain_score,clinical_risk_score,lab_abnormal_count,lab_urgent_count,crp,wbc,label
+0.20,0.08,0,35,2,0.1,0,0,2.0,6.5,normal
+0.12,0.18,1,68,8,0.7,2,0,35.0,14.0,fracture
+0.25,0.14,0,72,6,0.5,1,0,12.0,9.5,arthritis
+

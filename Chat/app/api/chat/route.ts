@@ -11,18 +11,107 @@ export const maxDuration = 60;
 
 export const dynamic = 'force-dynamic';
 
+const MEDICAL_BACKEND_URL =
+  process.env.MEDICAL_IMAGE_API_URL ||
+  process.env.NEXT_PUBLIC_MEDICAL_IMAGE_API_URL ||
+  'http://localhost:8000';
+
+function getLastUserText(msgs: UIMessage[]) {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m: any = msgs[i];
+    if (m?.role === 'user') {
+      const parts = Array.isArray(m?.parts) ? m.parts : [];
+      const text = parts
+        .filter((p: any) => p?.type === 'text')
+        .map((p: any) => String(p?.text ?? ''))
+        .join('\n');
+      return text || String(m?.content ?? '');
+    }
+  }
+  return '';
+}
+
+function normalizeVietnamese(text: string) {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase();
+}
+
+function asksForPatientPrivateInfo(text: string) {
+  const normalized = normalizeVietnamese(text);
+
+  const patientTerms = [
+    'nguoi benh',
+    'benh nhan',
+    'ho so benh',
+    'ho so dieu tri',
+    'thong tin dieu tri',
+    'thong tin benh nhan',
+    'thong tin nguoi benh',
+    'ma nguoi benh',
+    'manguoibenh',
+    'ma benh nhan',
+    'patient',
+    'medical record',
+  ];
+
+  const privateDataTerms = [
+    'ho ten',
+    'ten',
+    'ngay kham',
+    'ngay dieu tri',
+    'chan doan',
+    'ket qua dieu tri',
+    'lich su',
+    'xem',
+    'tim',
+    'tra cuu',
+    'lay',
+    'cho toi biet',
+    'chi tiet',
+  ];
+
+  const hasPatientTerm = patientTerms.some((term) => normalized.includes(term));
+  const hasPrivateDataTerm = privateDataTerms.some((term) => normalized.includes(term));
+  const hasLikelyPatientCode = /\b(?:BN|NB|MR|PT)[-_]?\d{2,}\b/i.test(text) || /\b\d{5,}\b/.test(text);
+
+  return hasPatientTerm && (hasPrivateDataTerm || hasLikelyPatientCode);
+}
+
+async function verifyMedicalAuthToken(token: string) {
+  if (!token) return false;
+
+  try {
+    const response = await fetch(`${MEDICAL_BACKEND_URL.replace(/\/$/, '')}/api/auth/me`, {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+      cache: 'no-store',
+    });
+    return response.ok;
+  } catch (error) {
+    console.error('Medical auth verification failed:', error);
+    return false;
+  }
+}
+
 export async function POST(req: Request) {
   const {
     messages,
     chatId,
     selectedModel,
     userId,
+    medicalAuthToken,
     mcpServers = [],
   }: {
     messages: UIMessage[];
     chatId?: string;
     selectedModel: modelID;
     userId: string;
+    medicalAuthToken?: string;
     mcpServers?: MCPServerConfig[];
   } = await req.json();
 
@@ -34,6 +123,24 @@ export async function POST(req: Request) {
   }
 
   const id = chatId || nanoid();
+  const lastUserText = getLastUserText(messages);
+
+  if (asksForPatientPrivateInfo(lastUserText)) {
+    const isMedicalUserLoggedIn = await verifyMedicalAuthToken(medicalAuthToken || '');
+    if (!isMedicalUserLoggedIn) {
+      return new Response(
+        JSON.stringify({
+          error:
+            'Bạn cần đăng nhập tài khoản y tế trước khi hỏi/xem thông tin chi tiết của một người bệnh. ' +
+            'Các câu hỏi kiến thức y tế chung vẫn có thể sử dụng không cần đăng nhập.',
+        }),
+        {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+  }
 
   // Initialize MCP clients using the already running persistent SSE servers
   // mcpServers now only contains SSE configurations since stdio servers
@@ -52,21 +159,6 @@ export async function POST(req: Request) {
   // StreamData lets us append structured data (e.g., verification score)
   // after the model finishes streaming its main answer.
   const data = new StreamData();
-
-  const getLastUserText = (msgs: UIMessage[]) => {
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m: any = msgs[i];
-      if (m?.role === 'user') {
-        const parts = Array.isArray(m?.parts) ? m.parts : [];
-        const text = parts
-          .filter((p: any) => p?.type === 'text')
-          .map((p: any) => String(p?.text ?? ''))
-          .join('\n');
-        return text || String(m?.content ?? '');
-      }
-    }
-    return '';
-  };
 
   const result = streamText({
     model: model.languageModel(selectedModel),

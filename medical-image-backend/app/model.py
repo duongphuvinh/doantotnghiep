@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -14,7 +15,7 @@ except Exception:  # pragma: no cover - optional runtime dependency
 
 class BoneModelService:
     def __init__(self, model_path: Path | None, labels: list[str]) -> None:
-        self.labels = labels
+        self.labels = self._load_labels(model_path, labels)
         self.model_path = model_path
         self.model = None
         self.device = "cpu"
@@ -74,3 +75,22 @@ class BoneModelService:
             self.load_error = str(exc)
             self.model = None
 
+    def _load_labels(self, model_path: Path | None, fallback: list[str]) -> list[str]:
+        if not model_path:
+            return fallback
+
+        candidates = [
+            model_path.with_suffix(".labels.json"),
+            model_path.parent / "bone_model.labels.json",
+            model_path.parent / "labels.json",
+        ]
+        for path in candidates:
+            if not path.exists():
+                continue
+            try:
+                labels = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(labels, list) and all(isinstance(label, str) for label in labels):
+                    return labels
+            except Exception:
+                continue
+        return fallback

@@ -1,0 +1,5 @@
+image_path,label
+dataset/normal/example_001.png,normal
+dataset/fracture/example_002.png,fracture
+dataset/arthritis/example_003.png,arthritis
+

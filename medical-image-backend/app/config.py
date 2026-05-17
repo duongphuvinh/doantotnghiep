@@ -17,6 +17,9 @@ class Settings(BaseModel):
         if label.strip()
     ]
     max_upload_mb: int = int(getenv("MEDICAL_IMAGE_MAX_UPLOAD_MB", "25"))
+    database_path: str = getenv("MEDICAL_IMAGE_DB_PATH", "data/medical_app.db")
+    auth_secret: str = getenv("MEDICAL_IMAGE_AUTH_SECRET", "dev-secret-change-me")
+    access_token_minutes: int = int(getenv("MEDICAL_IMAGE_ACCESS_TOKEN_MINUTES", "480"))
 
     @property
     def resolved_model_path(self) -> Path | None:
@@ -24,8 +27,21 @@ class Settings(BaseModel):
             return None
         return Path(self.model_path).expanduser().resolve()
 
+    @property
+    def resolved_database_path(self) -> Path:
+        return Path(self.database_path).expanduser().resolve()
+
+    def validate_security(self) -> None:
+        if self.auth_secret == "dev-secret-change-me":
+            # Keep local development ergonomic, but make the risk visible in logs.
+            print(
+                "[security] MEDICAL_IMAGE_AUTH_SECRET is using the development default. "
+                "Set a strong secret before using real patient data."
+            )
+
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
-
+    settings = Settings()
+    settings.validate_security()
+    return settings
