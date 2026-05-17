@@ -179,6 +179,7 @@ export function MedicalImageUpload() {
   const statusBadge = result?.prediction.status === "model_prediction"
     ? { label: "Model prediction", className: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-200" }
     : { label: "Analysis only", className: "border-amber-200 bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-200" };
+  const conclusion = result ? buildImageConclusion(result) : null;
 
   return (
     <div className="min-h-dvh w-full overflow-y-auto px-4 py-8 sm:px-6">
@@ -340,6 +341,25 @@ export function MedicalImageUpload() {
               <Metric label="Vùng xương ước tính" value={`${(result.features.estimated_bone_area_ratio * 100).toFixed(2)}%`} />
             </div>
 
+            {conclusion && (
+              <div className={cn("mt-4 rounded-md border p-4 text-sm", conclusion.className)}>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="text-xs font-medium uppercase opacity-80">Kết luận tham khảo</div>
+                    <h3 className="mt-1 text-base font-semibold">{conclusion.title}</h3>
+                  </div>
+                  <Badge variant="outline" className="w-fit bg-background/60">
+                    {conclusion.level}
+                  </Badge>
+                </div>
+                <ul className="mt-3 list-disc space-y-1 pl-5 text-xs leading-5">
+                  {conclusion.points.map((point) => (
+                    <li key={point}>{point}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {result.quality.warnings.length > 0 && (
               <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-100">
                 <div className="flex items-center gap-2 font-medium">
@@ -371,6 +391,65 @@ export function MedicalImageUpload() {
       </div>
     </div>
   );
+}
+
+function buildImageConclusion(result: ImageAnalysisResponse) {
+  const confidence = typeof result.prediction.confidence === "number"
+    ? `${(result.prediction.confidence * 100).toFixed(2)}%`
+    : null;
+
+  if (result.prediction.status === "model_prediction" && result.prediction.top_label) {
+    const label = result.prediction.top_label;
+    const diseaseName = labelToVietnamese(label);
+    const isNormal = label.toLowerCase() === "normal";
+
+    return {
+      title: isNormal
+        ? "Model chưa ghi nhận bất thường xương rõ trên phim."
+        : `Model gợi ý: ${diseaseName}.`,
+      level: confidence ? `Độ tin cậy ${confidence}` : "Có model AI",
+      className: isNormal
+        ? "border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-700/40 dark:bg-emerald-900/20 dark:text-emerald-100"
+        : "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-100",
+      points: [
+        `Nhãn AI: ${label}${confidence ? `, confidence ${confidence}` : ""}.`,
+        "Cần đối chiếu vị trí đau, triệu chứng, tiền sử chấn thương và kết luận của bác sĩ/chẩn đoán hình ảnh.",
+        result.safety_note,
+      ],
+    };
+  }
+
+  const points = [
+    "Chưa có model AI đã huấn luyện được cấu hình, nên hệ thống chưa thể kết luận người bệnh bị gãy xương, viêm khớp, loãng xương hay bệnh lý cụ thể.",
+    `Ảnh đã được tiền xử lý; vùng xương ước tính ${(result.features.estimated_bone_area_ratio * 100).toFixed(2)}%, độ tương phản ${result.quality.contrast_std}, độ sắc nét ${result.quality.sharpness_laplacian_var}.`,
+  ];
+
+  if (result.quality.warnings.length > 0) {
+    points.push(`Cần chú ý chất lượng ảnh: ${result.quality.warnings.join("; ")}.`);
+  } else {
+    points.push("Chất lượng ảnh đủ để trích xuất đặc trưng sơ bộ, nhưng chưa thay thế được kết luận bệnh lý từ model hoặc bác sĩ.");
+  }
+
+  points.push("Muốn có kết luận bệnh lý cụ thể, cần train/cấu hình model AI và dùng trang Đánh giá để so sánh với nhãn đúng.");
+
+  return {
+    title: "Chưa đủ cơ sở để kết luận bệnh lý xương cụ thể.",
+    level: "Analysis only",
+    className: "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-100",
+    points,
+  };
+}
+
+function labelToVietnamese(label: string) {
+  const normalized = label.toLowerCase();
+  const mapping: Record<string, string> = {
+    fracture: "nghi gãy xương",
+    arthritis: "nghi viêm/thoái hóa khớp",
+    osteoporosis: "nghi loãng xương",
+    normal: "bình thường",
+    other: "bất thường khác",
+  };
+  return mapping[normalized] || label;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

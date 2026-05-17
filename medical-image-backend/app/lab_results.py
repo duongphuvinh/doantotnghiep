@@ -220,6 +220,8 @@ class LabResultProcessor:
     def _guess_category(self, name: str) -> LabCategory:
         normalized = self._normalize_name(name)
         urine_tokens = ("urine", "nước tiểu", "nuoc tieu", "niệu", "nieu", "nitrite", "ketone", "protein")
+        if normalized in {"ph", "sg"}:
+            return "urine"
         return "urine" if any(token in normalized for token in urine_tokens) else "blood"
 
     def _normalize_name(self, name: str) -> str:
@@ -242,4 +244,3 @@ class LabResultProcessor:
         if ref.low is not None:
             return f">= {ref.low:g}{unit}"
         return "Không xác định"
-

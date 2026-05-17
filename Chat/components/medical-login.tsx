@@ -56,7 +56,7 @@ export function MedicalLogin() {
           ...(mode === "register" ? { full_name: fullName.trim() || undefined } : {}),
         }),
       });
-      const data = await response.json();
+      const data = await readJsonResponse(response);
       if (!response.ok) {
         throw new Error(data?.detail || "Không đăng nhập được");
       }
@@ -91,7 +91,7 @@ export function MedicalLogin() {
       const response = await fetch("/api/medical-auth/me", {
         headers: { authorization: `Bearer ${token}` },
       });
-      const data = await response.json();
+      const data = await readJsonResponse(response);
       if (!response.ok) {
         throw new Error(data?.detail || "Phiên đăng nhập không hợp lệ");
       }
@@ -228,3 +228,16 @@ export function MedicalLogin() {
   );
 }
 
+async function readJsonResponse(response: Response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {
+      detail: response.ok
+        ? text
+        : `Backend đăng nhập trả về lỗi không phải JSON: ${text.slice(0, 160)}`,
+    };
+  }
+}

@@ -15,12 +15,50 @@ Without trained weights, the API returns image-analysis features and a clear
 
 ## Quick Start
 
+Recommended Python versions: **3.11 or 3.12** for the widest compatibility,
+especially when installing optional PyTorch training dependencies. The backend
+also runs on newer Python versions when compatible wheels are available.
+
+### macOS / MacBook M1 / Linux
+
 ```bash
 cd medical-image-backend
+chmod +x scripts/setup_backend.sh
+./scripts/setup_backend.sh
+./.venv/bin/python scripts/run_backend.py --reload
+```
+
+If MacBook M1 fails while building `numpy`, `opencv-python-headless`, or
+`torch`, install Python 3.12 and recreate the virtual environment:
+
+```bash
+brew install python@3.12
+rm -rf .venv
+PYTHON_BIN=python3.12 ./scripts/setup_backend.sh
+./.venv/bin/python scripts/run_backend.py --reload
+```
+
+### Windows PowerShell
+
+```bash
+cd medical-image-backend
+.\scripts\setup_backend.ps1
+.\.venv\Scripts\python.exe scripts\run_backend.py --reload
+```
+
+### Windows Git Bash
+
+```bash
+cd ~/Desktop/doantotnghiep/medical-image-backend
+./.venv/Scripts/python.exe scripts/run_backend.py --reload
+```
+
+If `.venv` does not exist yet in Git Bash, run setup once from PowerShell or run:
+
+```bash
 python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+./.venv/Scripts/python.exe -m pip install -r requirements.txt
+./.venv/Scripts/python.exe scripts/seed_demo_patients.py
 ```
 
 If you already have trained PyTorch weights and want model inference:
@@ -98,9 +136,18 @@ models/bone_cnn/metrics.json
 
 Run backend with the trained model:
 
+Windows PowerShell:
+
+```powershell
+$env:MEDICAL_IMAGE_MODEL_PATH="models/bone_cnn/bone_model.pt"
+.\.venv\Scripts\python.exe scripts\run_backend.py --reload
+```
+
+macOS/Linux:
+
 ```bash
-set MEDICAL_IMAGE_MODEL_PATH=models/bone_cnn/bone_model.pt
-uvicorn app.main:app --reload --port 8000
+export MEDICAL_IMAGE_MODEL_PATH=models/bone_cnn/bone_model.pt
+./.venv/bin/python scripts/run_backend.py --reload
 ```
 
 Quick prediction test:

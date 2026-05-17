@@ -49,13 +49,25 @@ async function proxyAuthRequest(req: Request, action: string, method: "GET" | "P
       body: method === "POST" ? await req.text() : undefined,
     });
 
-    const contentType = response.headers.get("content-type") || "application/json";
+    const contentType = response.headers.get("content-type") || "";
     const body = await response.text();
+    const isJson = contentType.includes("application/json");
+
+    if (!isJson) {
+      return Response.json(
+        {
+          detail: response.ok
+            ? body
+            : `Medical backend returned non-JSON error: ${body || response.statusText}`,
+        },
+        { status: response.status }
+      );
+    }
 
     return new Response(body, {
       status: response.status,
       headers: {
-        "content-type": contentType,
+        "content-type": "application/json",
       },
     });
   } catch (error) {
@@ -71,4 +83,3 @@ async function proxyAuthRequest(req: Request, action: string, method: "GET" | "P
     );
   }
 }
-

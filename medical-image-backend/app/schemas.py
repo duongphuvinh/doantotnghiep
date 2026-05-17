@@ -63,7 +63,7 @@ class ImageAnalysisResponse(BaseModel):
 
 
 Gender = Literal["male", "female", "other", "unknown"]
-UserRole = Literal["clinician", "admin"]
+UserRole = Literal["patient", "clinician", "admin"]
 
 
 class UserCreate(BaseModel):
