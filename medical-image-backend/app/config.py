@@ -4,10 +4,12 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+DEFAULT_MODEL_PATH = "models/bone_feature_demo/bone_feature_model.json"
+
 
 class Settings(BaseModel):
     app_name: str = "Medical Image Backend"
-    model_path: str | None = getenv("MEDICAL_IMAGE_MODEL_PATH")
+    model_path: str | None = getenv("MEDICAL_IMAGE_MODEL_PATH", DEFAULT_MODEL_PATH)
     model_labels: list[str] = [
         label.strip()
         for label in getenv(
@@ -25,7 +27,8 @@ class Settings(BaseModel):
     def resolved_model_path(self) -> Path | None:
         if not self.model_path:
             return None
-        return Path(self.model_path).expanduser().resolve()
+        path = Path(self.model_path).expanduser().resolve()
+        return path if path.exists() else None
 
     @property
     def resolved_database_path(self) -> Path:

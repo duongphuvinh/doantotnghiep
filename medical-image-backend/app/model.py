@@ -5,6 +5,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .feature_model import extract_feature_model_vector
+from .processor import MedicalImageProcessor
 from .schemas import PredictionResult
 
 try:
@@ -18,8 +20,10 @@ class BoneModelService:
         self.labels = self._load_labels(model_path, labels)
         self.model_path = model_path
         self.model = None
+        self.model_kind: str | None = None
         self.device = "cpu"
         self.load_error: str | None = None
+        self.feature_processor = MedicalImageProcessor()
 
         if model_path:
             self._load_model(model_path)
@@ -37,6 +41,9 @@ class BoneModelService:
                 status="analysis_only",
                 note=f"{reason} Returning preprocessing and feature analysis only.",
             )
+
+        if self.model_kind in {"feature_centroid", "feature_knn"}:
+            return self._predict_feature_model(image)
 
         assert torch is not None
         tensor = torch.from_numpy(image.astype("float32") / 255.0)
@@ -61,19 +68,93 @@ class BoneModelService:
         )
 
     def _load_model(self, model_path: Path) -> None:
-        if torch is None:
-            self.load_error = "PyTorch is not installed"
-            return
         if not model_path.exists():
             self.load_error = f"File not found: {model_path}"
+            return
+
+        if model_path.suffix.lower() == ".json":
+            self._load_feature_centroid_model(model_path)
+            return
+
+        if torch is None:
+            self.load_error = "PyTorch is not installed"
             return
 
         try:
             self.model = torch.jit.load(str(model_path), map_location=self.device)
             self.model.eval()
+            self.model_kind = "torchscript"
         except Exception as exc:
             self.load_error = str(exc)
             self.model = None
+            self.model_kind = None
+
+    def _load_feature_centroid_model(self, model_path: Path) -> None:
+        try:
+            payload = json.loads(model_path.read_text(encoding="utf-8"))
+            if payload.get("model_type") not in {"feature_centroid", "feature_knn"}:
+                raise ValueError("Unsupported JSON model_type")
+            labels = payload.get("labels")
+            feature_mean = payload.get("feature_mean")
+            feature_scale = payload.get("feature_scale")
+            if not labels or not feature_mean or not feature_scale:
+                raise ValueError("Feature model JSON is missing required fields")
+
+            self.labels = [str(label) for label in labels]
+            self.model = {
+                "feature_mean": np.asarray(feature_mean, dtype=np.float32),
+                "feature_scale": np.asarray(feature_scale, dtype=np.float32),
+                "k": int(payload.get("k", 5)),
+            }
+            if payload.get("model_type") == "feature_knn":
+                self.model["train_vectors"] = np.asarray(payload.get("train_vectors"), dtype=np.float32)
+                self.model["train_targets"] = np.asarray(payload.get("train_targets"), dtype=np.int64)
+            else:
+                self.model["centroids"] = np.asarray(payload.get("centroids"), dtype=np.float32)
+            self.model_kind = payload.get("model_type")
+        except Exception as exc:
+            self.load_error = str(exc)
+            self.model = None
+            self.model_kind = None
+
+    def _predict_feature_model(self, image: np.ndarray) -> PredictionResult:
+        assert isinstance(self.model, dict)
+        features = extract_feature_model_vector(image, self.feature_processor)
+        mean = self.model["feature_mean"]
+        scale = self.model["feature_scale"]
+        normalized = (features - mean) / np.maximum(scale, 1e-6)
+
+        if self.model_kind == "feature_knn":
+            train_vectors = self.model["train_vectors"]
+            train_targets = self.model["train_targets"]
+            distances = np.linalg.norm(train_vectors - normalized, axis=1)
+            k = max(1, min(int(self.model["k"]), len(distances)))
+            neighbor_indices = np.argsort(distances)[:k]
+            weights = 1.0 / np.maximum(distances[neighbor_indices], 1e-6)
+            probs = np.zeros(len(self.labels), dtype=np.float32)
+            for index, weight in zip(neighbor_indices, weights):
+                target = int(train_targets[index])
+                if 0 <= target < len(probs):
+                    probs[target] += float(weight)
+            probs = probs / np.maximum(probs.sum(), 1e-12)
+        else:
+            centroids = self.model["centroids"]
+            distances = np.linalg.norm(centroids - normalized, axis=1)
+            scores = -distances
+            scores = scores - scores.max()
+            exp_scores = np.exp(scores)
+            probs = exp_scores / np.maximum(exp_scores.sum(), 1e-12)
+
+        top_index = int(np.argmax(probs))
+
+        return PredictionResult(
+            status="model_prediction",
+            labels=self.labels[: len(probs)],
+            probabilities=[round(float(p), 6) for p in probs],
+            top_label=self.labels[top_index] if top_index < len(self.labels) else str(top_index),
+            confidence=round(float(probs[top_index]), 6),
+            note=f"Prediction generated by the trained {self.model_kind} bone model.",
+        )
 
     def _load_labels(self, model_path: Path | None, fallback: list[str]) -> list[str]:
         if not model_path:

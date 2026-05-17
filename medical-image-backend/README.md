@@ -85,9 +85,71 @@ analysis-only mode.
 
 ## Training a Bone Pathology Model
 
-The project includes a trainable offline CNN for grayscale bone images. It
-exports TorchScript, so the existing `/api/images/analyze` endpoint can load it
-directly.
+The project includes two training paths:
+
+- Lightweight feature model: no PyTorch required, exports JSON, good for demo
+  and small labeled datasets.
+- CNN model: requires PyTorch, exports TorchScript, better suited when you have
+  a larger real dataset.
+
+### Option 1: Lightweight Feature Model
+
+Create a synthetic demo dataset and train a JSON model:
+
+```bash
+python scripts/create_demo_bone_dataset.py --out-dir examples/demo_bone_dataset --samples-per-class 24
+python scripts/train_bone_feature_model.py --data-dir examples/demo_bone_dataset --out-dir models/bone_feature_demo
+```
+
+The backend automatically looks for:
+
+```text
+models/bone_feature_demo/bone_feature_model.json
+```
+
+Restart the backend after training. `/api/images/analyze` will then return
+`model_prediction` instead of `analysis_only`.
+
+For real training data, use folder-per-class format:
+
+```text
+real_dataset/
+  normal/
+    img001.png
+  fracture/
+    img002.png
+  arthritis/
+    img003.png
+  osteoporosis/
+    img004.png
+```
+
+Train:
+
+```bash
+python scripts/train_bone_feature_model.py --data-dir real_dataset --out-dir models/bone_feature_demo
+```
+
+Or CSV format:
+
+```csv
+image_path,label
+images/img001.png,normal
+images/img002.png,fracture
+```
+
+```bash
+python scripts/train_bone_feature_model.py --csv labels.csv --image-root . --out-dir models/bone_feature_demo
+```
+
+The synthetic dataset is only for checking the pipeline. Use real labeled
+X-ray/CT/MRI data for meaningful medical performance.
+
+### Option 2: CNN / TorchScript Model
+
+The CNN path trains an offline CNN for grayscale bone images. It exports
+TorchScript, so the existing `/api/images/analyze` endpoint can load it
+directly when `MEDICAL_IMAGE_MODEL_PATH` points to the `.pt` file.
 
 ### Dataset Format A: Folder per Class
 
