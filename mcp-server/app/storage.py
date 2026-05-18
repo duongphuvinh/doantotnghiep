@@ -75,6 +75,23 @@ class Database:
                         note TEXT,
                         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                     );
+
+                    CREATE TABLE IF NOT EXISTS upload_records (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        upload_type TEXT NOT NULL,
+                        filename TEXT NOT NULL,
+                        content_type TEXT,
+                        file_path TEXT,
+                        file_size INTEGER,
+                        modality TEXT,
+                        body_part TEXT,
+                        source_text TEXT,
+                        analysis_json TEXT NOT NULL,
+                        label_status TEXT NOT NULL DEFAULT 'unlabeled',
+                        usable_for_training INTEGER NOT NULL DEFAULT 1,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );
                     """
                 )
 
@@ -234,3 +251,70 @@ class Database:
                     (user_id,),
                 ).fetchall()
             return [dict(row) for row in rows]
+
+    def create_upload_record(self, owner_user_id: int, data: dict[str, Any]) -> dict:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO upload_records (
+                    owner_user_id,
+                    upload_type,
+                    filename,
+                    content_type,
+                    file_path,
+                    file_size,
+                    modality,
+                    body_part,
+                    source_text,
+                    analysis_json,
+                    label_status,
+                    usable_for_training
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    owner_user_id,
+                    data["upload_type"],
+                    data["filename"],
+                    data.get("content_type"),
+                    data.get("file_path"),
+                    data.get("file_size"),
+                    data.get("modality"),
+                    data.get("body_part"),
+                    data.get("source_text"),
+                    json.dumps(data.get("analysis", {}), ensure_ascii=False),
+                    data.get("label_status", "unlabeled"),
+                    1 if data.get("usable_for_training", True) else 0,
+                ),
+            )
+            row = conn.execute("SELECT * FROM upload_records WHERE id = ?", (int(cursor.lastrowid),)).fetchone()
+            return self._upload_record_from_row(row)
+
+    def list_upload_records(self, user_id: int, role: str, upload_type: str | None = None) -> list[dict]:
+        with self.connect() as conn:
+            filters: list[str] = []
+            params: list[Any] = []
+            if role != "admin":
+                filters.append("owner_user_id = ?")
+                params.append(user_id)
+            if upload_type:
+                filters.append("upload_type = ?")
+                params.append(upload_type)
+
+            where = f"WHERE {' AND '.join(filters)}" if filters else ""
+            rows = conn.execute(
+                f"SELECT * FROM upload_records {where} ORDER BY created_at DESC",
+                params,
+            ).fetchall()
+            return [self._upload_record_from_row(row) for row in rows]
+
+    def get_upload_record_by_id(self, record_id: int) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM upload_records WHERE id = ?", (record_id,)).fetchone()
+            return self._upload_record_from_row(row) if row else None
+
+    def _upload_record_from_row(self, row: sqlite3.Row) -> dict:
+        data = dict(row)
+        data["analysis"] = json.loads(data.pop("analysis_json"))
+        data["usable_for_training"] = bool(data["usable_for_training"])
+        return data

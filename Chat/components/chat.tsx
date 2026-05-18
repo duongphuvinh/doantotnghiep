@@ -34,6 +34,7 @@ export default function Chat() {
   const [userId, setUserId] = useState<string>('');
   const [generatedChatId, setGeneratedChatId] = useState<string>('');
   const [medicalAuthToken, setMedicalAuthToken] = useState<string>('');
+  const [chatApiKeys, setChatApiKeys] = useState<Record<string, string>>({});
   
   // Get MCP server data from context
   const { mcpServersForApi } = useMCP();
@@ -51,6 +52,24 @@ export default function Chat() {
     return () => {
       window.removeEventListener("medical-auth-changed", refreshToken);
       window.removeEventListener("storage", refreshToken);
+    };
+  }, []);
+
+  useEffect(() => {
+    const refreshApiKeys = () => {
+      const keys: Record<string, string> = {};
+      ["GOOGLE_API_KEY", "GEMINI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY"].forEach((key) => {
+        const value = window.localStorage.getItem(key);
+        if (value) keys[key] = value;
+      });
+      setChatApiKeys(keys);
+    };
+    refreshApiKeys();
+    window.addEventListener("storage", refreshApiKeys);
+    window.addEventListener("api-keys-changed", refreshApiKeys);
+    return () => {
+      window.removeEventListener("storage", refreshApiKeys);
+      window.removeEventListener("api-keys-changed", refreshApiKeys);
     };
   }, []);
   
@@ -114,6 +133,7 @@ export default function Chat() {
         chatId: chatId || generatedChatId, // Use generated ID if no chatId in URL
         userId,
         medicalAuthToken,
+        apiKeys: chatApiKeys,
       },
       experimental_throttle: 500,
       onFinish: () => {

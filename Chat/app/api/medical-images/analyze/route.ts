@@ -10,10 +10,12 @@ export async function POST(req: Request) {
     DEFAULT_BACKEND_URL;
 
   const formData = await req.formData();
+  const authorization = req.headers.get('authorization');
 
   try {
     const response = await fetch(`${backendUrl.replace(/\/$/, '')}/api/images/analyze`, {
       method: 'POST',
+      headers: authorization ? { authorization } : undefined,
       body: formData,
     });
 

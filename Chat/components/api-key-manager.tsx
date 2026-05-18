@@ -38,6 +38,13 @@ const API_KEYS_CONFIG: ApiKeyConfig[] = [
     placeholder: "gsk_..."
   },
   {
+    name: "Google",
+    key: "google",
+    storageKey: "GOOGLE_API_KEY",
+    label: "Google Gemini API Key",
+    placeholder: "AIza..."
+  },
+  {
     name: "XAI",
     key: "xai",
     storageKey: "XAI_API_KEY",
@@ -90,6 +97,7 @@ export function ApiKeyManager({ open, onOpenChange }: ApiKeyManagerProps) {
         }
       });
       
+      window.dispatchEvent(new Event("api-keys-changed"));
       toast.success("API keys saved successfully");
       onOpenChange(false);
     } catch (error) {
@@ -106,6 +114,7 @@ export function ApiKeyManager({ open, onOpenChange }: ApiKeyManagerProps) {
       });
       
       setApiKeys({});
+      window.dispatchEvent(new Event("api-keys-changed"));
       toast.success("All API keys cleared");
     } catch (error) {
       console.error("Error clearing API keys:", error);

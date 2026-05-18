@@ -30,6 +30,8 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { normalizeLabAnalyzeResponse } from "@/lib/lab-result-normalizer";
 import { getMedicalAuthToken, getMedicalAuthUser, type MedicalUser } from "@/lib/medical-auth";
+import { saveLatestLabSnapshot } from "@/lib/medical-fusion-cache";
+import { fetchUploadHistory, formatUploadTime, openUploadFile, type UploadHistoryItem } from "@/lib/upload-history";
 import { cn } from "@/lib/utils";
 
 type Gender = "male" | "female" | "other" | "unknown";
@@ -98,6 +100,9 @@ export function LabResultsReader() {
   const [gender, setGender] = useState<Gender>("unknown");
   const [rawText, setRawText] = useState("");
   const [labFile, setLabFile] = useState<File | null>(null);
+  const [history, setHistory] = useState<UploadHistoryItem[]>([]);
+  const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
+  const [compareIds, setCompareIds] = useState<number[]>([]);
   const [rows, setRows] = useState<LabInputRow[]>([
     { id: crypto.randomUUID(), category: "blood", name: "WBC", value: "", unit: "10^9/L" },
     { id: crypto.randomUUID(), category: "blood", name: "HGB", value: "", unit: "g/dL" },
@@ -113,11 +118,31 @@ export function LabResultsReader() {
     return () => window.removeEventListener("medical-auth-changed", refreshUser);
   }, []);
 
+  useEffect(() => {
+    if (!medicalUser) {
+      setHistory([]);
+      return;
+    }
+    fetchUploadHistory("lab").then(setHistory);
+  }, [medicalUser]);
+
   const abnormalItems = useMemo(
     () => result?.items.filter((item) => ["low", "high", "positive", "abnormal"].includes(item.status)) ?? [],
     [result]
   );
   const conclusion = useMemo(() => (result ? buildLabConclusion(result) : null), [result]);
+  const selectedHistory = useMemo(
+    () => history.find((item) => item.id === selectedHistoryId) ?? null,
+    [history, selectedHistoryId]
+  );
+  const compareItems = useMemo(
+    () =>
+      (compareIds.map((id) => history.find((item) => item.id === id)).filter(Boolean) as UploadHistoryItem[]).sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      ),
+    [compareIds, history]
+  );
+  const comparisonRows = useMemo(() => buildLabComparison(compareItems[0], compareItems[1]), [compareItems]);
 
   const addRow = (category: LabCategory) => {
     const [name, unit] = category === "blood" ? commonBlood[0] : commonUrine[0];
@@ -141,6 +166,21 @@ export function LabResultsReader() {
 
   const removeRow = (id: string) => {
     setRows((current) => current.filter((row) => row.id !== id));
+  };
+
+  const toggleCompare = (id: number) => {
+    setCompareIds((current) => {
+      if (current.includes(id)) return current.filter((item) => item !== id);
+      return [...current.slice(-1), id];
+    });
+  };
+
+  const handleOpenUploadedLabFile = async (item: UploadHistoryItem) => {
+    try {
+      await openUploadFile(item);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không mở được phiếu xét nghiệm đã upload");
+    }
   };
 
   const analyze = async () => {
@@ -185,7 +225,18 @@ export function LabResultsReader() {
       if (!response.ok) {
         throw new Error(data?.detail || "Không đọc được kết quả xét nghiệm");
       }
-      setResult(normalizeLabAnalyzeResponse(data) as LabAnalyzeResponse);
+      const normalized = normalizeLabAnalyzeResponse(data) as LabAnalyzeResponse;
+      setResult(normalized);
+      const manualText = values
+        .map((item) => `${item.name} ${String(item.value)}${item.unit ? ` ${item.unit}` : ""}`)
+        .join("\n");
+      saveLatestLabSnapshot(medicalUser, {
+        rawText: rawText.trim() || manualText,
+        age,
+        gender,
+        result: normalized,
+      });
+      fetchUploadHistory("lab").then(setHistory);
       toast.success("Đã đọc kết quả xét nghiệm");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Có lỗi khi đọc xét nghiệm");
@@ -234,7 +285,15 @@ export function LabResultsReader() {
       if (!response.ok) {
         throw new Error(data?.detail || "Không đọc được file xét nghiệm");
       }
-      setResult(normalizeLabAnalyzeResponse(data) as LabAnalyzeResponse);
+      const normalized = normalizeLabAnalyzeResponse(data) as LabAnalyzeResponse;
+      setResult(normalized);
+      saveLatestLabSnapshot(medicalUser, {
+        rawText: normalized.raw_text_preview || "",
+        age,
+        gender,
+        result: normalized,
+      });
+      fetchUploadHistory("lab").then(setHistory);
       toast.success("Đã đọc file xét nghiệm");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Có lỗi khi upload file xét nghiệm");
@@ -499,6 +558,137 @@ export function LabResultsReader() {
             )}
           </section>
         </div>
+
+        {medicalUser && (
+          <section className="rounded-lg border border-border/70 bg-background/70 p-4 shadow-sm sm:p-5">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold">Nhật ký upload xét nghiệm</h2>
+                <p className="text-xs text-muted-foreground">
+                  Kết quả đã đọc được lưu theo tài khoản để xem lại và làm dữ liệu train sau khi kiểm chứng nhãn.
+                </p>
+              </div>
+              <Badge variant="outline">{history.length} lần lưu</Badge>
+            </div>
+            <div className="mt-4 space-y-2">
+              {history.length === 0 ? (
+                <div className="rounded-md border border-dashed border-border bg-muted/15 p-4 text-sm text-muted-foreground">
+                  Chưa có phiếu xét nghiệm nào được lưu cho tài khoản này.
+                </div>
+              ) : (
+                history.slice(0, 8).map((item) => (
+                  <div key={item.id} className="rounded-md border border-border/60 bg-muted/15 p-3">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">{item.filename}</div>
+                        <div className="text-xs text-muted-foreground">{formatUploadTime(item.created_at)}</div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="w-fit">
+                          {item.usable_for_training ? "Train-ready" : "Không train"}
+                        </Badge>
+                        <Button type="button" size="sm" variant="outline" onClick={() => setSelectedHistoryId(item.id)}>
+                          Xem kết quả
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={!item.file_path}
+                          onClick={() => handleOpenUploadedLabFile(item)}
+                        >
+                          Xem phiếu
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={compareIds.includes(item.id) ? "secondary" : "outline"}
+                          onClick={() => toggleCompare(item.id)}
+                        >
+                          {compareIds.includes(item.id) ? "Đã chọn" : "So sánh"}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {selectedHistory && (
+              <div className="mt-5 rounded-lg border border-border/70 bg-background/80 p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="text-xs font-medium uppercase text-muted-foreground">Kết quả đã upload</div>
+                    <h3 className="mt-1 text-base font-semibold">{selectedHistory.filename}</h3>
+                    <p className="mt-1 text-xs text-muted-foreground">{formatUploadTime(selectedHistory.created_at)}</p>
+                  </div>
+                  <Badge variant="outline">{getLabAnalysis(selectedHistory)?.abnormal_count ?? 0} bất thường</Badge>
+                </div>
+                <p className="mt-3 text-sm text-muted-foreground">{getLabAnalysis(selectedHistory)?.summary || "Không có tóm tắt."}</p>
+                <div className="mt-4 space-y-2">
+                  {(getLabAnalysis(selectedHistory)?.items ?? []).map((item, index) => (
+                    <div key={`${item.code}-${index}`} className="rounded-md border border-border/60 bg-muted/15 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="font-medium">{item.name}</div>
+                          <div className="text-xs text-muted-foreground">{item.code}</div>
+                        </div>
+                        <StatusBadge status={item.status} severity={item.severity} />
+                      </div>
+                      <div className="mt-2 grid gap-2 text-sm md:grid-cols-2">
+                        <div>
+                          Giá trị: <span className="font-semibold">{String(item.value)} {item.unit || ""}</span>
+                        </div>
+                        <div>
+                          Tham khảo: <span className="font-semibold">{item.reference_range}</span>
+                        </div>
+                      </div>
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">{item.interpretation}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {compareItems.length > 0 && (
+              <div className="mt-5 rounded-lg border border-border/70 bg-background/80 p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-xs font-medium uppercase text-muted-foreground">So sánh 2 lần upload</div>
+                    <h3 className="mt-1 text-base font-semibold">
+                      {compareItems.length < 2 ? "Chọn thêm một phiếu để so sánh" : "Bảng thay đổi chỉ số"}
+                    </h3>
+                  </div>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => setCompareIds([])}>
+                    Bỏ chọn
+                  </Button>
+                </div>
+                {compareItems.length === 2 && (
+                  <div className="mt-4 overflow-x-auto">
+                    <div className="min-w-[720px] rounded-md border border-border/60">
+                      <div className="grid grid-cols-[1.1fr_1fr_1fr_0.8fr_1fr] bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
+                        <div>Chỉ số</div>
+                        <div>{formatUploadTime(compareItems[0].created_at)}</div>
+                        <div>{formatUploadTime(compareItems[1].created_at)}</div>
+                        <div>Thay đổi</div>
+                        <div>Nhận xét</div>
+                      </div>
+                      {comparisonRows.map((row) => (
+                        <div key={row.key} className="grid grid-cols-[1.1fr_1fr_1fr_0.8fr_1fr] border-t border-border/60 px-3 py-2 text-sm">
+                          <div className="font-medium">{row.name}</div>
+                          <div>{row.previous}</div>
+                          <div>{row.current}</div>
+                          <div className={cn(row.deltaClassName)}>{row.delta}</div>
+                          <div className="text-muted-foreground">{row.note}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+        )}
       </div>
     </div>
   );
@@ -530,6 +720,81 @@ function StatusBadge({ status, severity }: { status: string; severity: string })
       {label}
     </Badge>
   );
+}
+
+function getLabAnalysis(item: UploadHistoryItem | null): LabAnalyzeResponse | null {
+  if (!item || !Array.isArray(item.analysis?.items)) return null;
+  return item.analysis as unknown as LabAnalyzeResponse;
+}
+
+function buildLabComparison(first?: UploadHistoryItem, second?: UploadHistoryItem) {
+  const previous = getLabAnalysis(first ?? null);
+  const current = getLabAnalysis(second ?? null);
+  if (!previous || !current) return [];
+
+  const previousMap = new Map(previous.items.map((item) => [item.code || item.name, item]));
+  const currentMap = new Map(current.items.map((item) => [item.code || item.name, item]));
+  const keys = Array.from(new Set([...previousMap.keys(), ...currentMap.keys()]));
+
+  return keys.map((key) => {
+    const before = previousMap.get(key);
+    const after = currentMap.get(key);
+    const beforeNumber = parseLabNumber(before?.value);
+    const afterNumber = parseLabNumber(after?.value);
+    const deltaValue =
+      beforeNumber !== null && afterNumber !== null
+        ? afterNumber - beforeNumber
+        : null;
+    const delta =
+      deltaValue === null
+        ? "-"
+        : `${deltaValue > 0 ? "+" : ""}${Number(deltaValue.toFixed(2))}`;
+    const statusChanged = before?.status && after?.status && before.status !== after.status;
+
+    return {
+      key,
+      name: after?.name || before?.name || key,
+      previous: before ? `${String(before.value)} ${before.unit || ""}`.trim() : "Không có",
+      current: after ? `${String(after.value)} ${after.unit || ""}`.trim() : "Không có",
+      delta,
+      deltaClassName:
+        deltaValue === null
+          ? "text-muted-foreground"
+          : deltaValue > 0
+            ? "text-amber-700"
+            : deltaValue < 0
+              ? "text-emerald-700"
+              : "text-muted-foreground",
+      note: statusChanged
+        ? `${statusLabel(before.status)} -> ${statusLabel(after.status)}`
+        : after?.status
+          ? statusLabel(after.status)
+          : "Chỉ có ở phiếu cũ",
+    };
+  });
+}
+
+function parseLabNumber(value: unknown) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const number = Number(value.replace(",", "."));
+  return Number.isFinite(number) ? number : null;
+}
+
+function statusLabel(status: string) {
+  return status === "low"
+    ? "thấp"
+    : status === "normal"
+      ? "bình thường"
+      : status === "high"
+        ? "cao"
+        : status === "positive"
+          ? "dương tính"
+          : status === "negative"
+            ? "âm tính"
+            : status === "unknown"
+              ? "chưa rõ"
+              : status;
 }
 
 function buildLabConclusion(result: LabAnalyzeResponse) {

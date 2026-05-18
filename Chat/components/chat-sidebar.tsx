@@ -65,6 +65,11 @@ export function ChatSidebar() {
     const [editUserIdOpen, setEditUserIdOpen] = useState(false);
     const [newUserId, setNewUserId] = useState('');
     const [medicalUser, setMedicalUser] = useState<MedicalUser | null>(null);
+    const navButtonClass = cn(
+        "w-full justify-start gap-3 px-4 text-left",
+        isCollapsed && "h-8 w-8 justify-center p-0"
+    );
+    const navIconClass = "h-4 w-4 shrink-0";
 
     // Get MCP server data from context
     const { mcpServers, setMcpServers, selectedMcpServers, setSelectedMcpServers } = useMCP();
@@ -307,13 +312,13 @@ export function ChatSidebar() {
                         <Button
                             variant="default"
                             className={cn(
-                                "w-full bg-primary text-primary-foreground hover:bg-primary/90",
-                                isCollapsed ? "w-8 h-8 p-0" : ""
+                                navButtonClass,
+                                "bg-primary text-primary-foreground hover:bg-primary/90"
                             )}
                             onClick={handleNewChat}
                             title={isCollapsed ? "New Chat" : undefined}
                         >
-                            <PlusCircle className={`${isCollapsed ? "" : "mr-2"} h-4 w-4`} />
+                            <PlusCircle className={navIconClass} />
                             {!isCollapsed && <span>New Chat</span>}
                         </Button>
                     </motion.div>
@@ -324,14 +329,11 @@ export function ChatSidebar() {
                     >
                         <Button
                             variant={pathname === "/medical-images" ? "secondary" : "outline"}
-                            className={cn(
-                                "w-full",
-                                isCollapsed ? "w-8 h-8 p-0" : ""
-                            )}
+                            className={navButtonClass}
                             onClick={handleMedicalImageUpload}
                             title={isCollapsed ? "Upload phim xương" : undefined}
                         >
-                            <ImageUp className={`${isCollapsed ? "" : "mr-2"} h-4 w-4`} />
+                            <ImageUp className={navIconClass} />
                             {!isCollapsed && <span>Upload phim xương</span>}
                         </Button>
                     </motion.div>
@@ -342,14 +344,11 @@ export function ChatSidebar() {
                     >
                         <Button
                             variant={pathname === "/lab-results" ? "secondary" : "outline"}
-                            className={cn(
-                                "w-full",
-                                isCollapsed ? "w-8 h-8 p-0" : ""
-                            )}
+                            className={navButtonClass}
                             onClick={handleLabResults}
                             title={isCollapsed ? "Xét nghiệm" : undefined}
                         >
-                            <FlaskConical className={`${isCollapsed ? "" : "mr-2"} h-4 w-4`} />
+                            <FlaskConical className={navIconClass} />
                             {!isCollapsed && <span>Xét nghiệm</span>}
                         </Button>
                     </motion.div>
@@ -360,14 +359,11 @@ export function ChatSidebar() {
                     >
                         <Button
                             variant={pathname === "/multimodal" ? "secondary" : "outline"}
-                            className={cn(
-                                "w-full",
-                                isCollapsed ? "w-8 h-8 p-0" : ""
-                            )}
+                            className={navButtonClass}
                             onClick={handleMultimodal}
                             title={isCollapsed ? "Fusion" : undefined}
                         >
-                            <BrainCircuit className={`${isCollapsed ? "" : "mr-2"} h-4 w-4`} />
+                            <BrainCircuit className={navIconClass} />
                             {!isCollapsed && <span>Fusion</span>}
                         </Button>
                     </motion.div>
@@ -378,14 +374,11 @@ export function ChatSidebar() {
                     >
                         <Button
                             variant={pathname === "/model-evaluation" ? "secondary" : "outline"}
-                            className={cn(
-                                "w-full",
-                                isCollapsed ? "w-8 h-8 p-0" : ""
-                            )}
+                            className={navButtonClass}
                             onClick={handleModelEvaluation}
                             title={isCollapsed ? "Đánh giá model" : undefined}
                         >
-                            <BarChart3 className={`${isCollapsed ? "" : "mr-2"} h-4 w-4`} />
+                            <BarChart3 className={navIconClass} />
                             {!isCollapsed && <span>Đánh giá</span>}
                         </Button>
                     </motion.div>
@@ -397,14 +390,11 @@ export function ChatSidebar() {
                     >
                         <Button
                             variant={pathname === "/medical-login" ? "secondary" : "outline"}
-                            className={cn(
-                                "w-full",
-                                isCollapsed ? "w-8 h-8 p-0" : ""
-                            )}
+                            className={navButtonClass}
                             onClick={handleMedicalLogin}
                             title={isCollapsed ? "Đăng nhập y tế" : undefined}
                         >
-                            <LogIn className={`${isCollapsed ? "" : "mr-2"} h-4 w-4`} />
+                            <LogIn className={navIconClass} />
                             {!isCollapsed && <span>Đăng nhập</span>}
                         </Button>
                     </motion.div>

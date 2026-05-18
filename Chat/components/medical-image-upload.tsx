@@ -27,7 +27,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { getMedicalAuthUser, type MedicalUser } from "@/lib/medical-auth";
+import { getMedicalAuthToken, getMedicalAuthUser, type MedicalUser } from "@/lib/medical-auth";
+import { saveLatestImageSnapshot } from "@/lib/medical-fusion-cache";
+import { fetchUploadHistory, formatUploadTime, openUploadFile, type UploadHistoryItem } from "@/lib/upload-history";
 import { cn } from "@/lib/utils";
 
 type Modality = "xray" | "ct" | "mri" | "unknown";
@@ -90,6 +92,9 @@ export function MedicalImageUpload() {
   const [isUploading, setIsUploading] = useState(false);
   const [result, setResult] = useState<ImageAnalysisResponse | null>(null);
   const [medicalUser, setMedicalUser] = useState<MedicalUser | null>(null);
+  const [history, setHistory] = useState<UploadHistoryItem[]>([]);
+  const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
+  const [compareIds, setCompareIds] = useState<number[]>([]);
 
   useEffect(() => {
     const refreshUser = () => setMedicalUser(getMedicalAuthUser());
@@ -98,12 +103,47 @@ export function MedicalImageUpload() {
     return () => window.removeEventListener("medical-auth-changed", refreshUser);
   }, []);
 
+  useEffect(() => {
+    if (!medicalUser) {
+      setHistory([]);
+      return;
+    }
+    fetchUploadHistory("image").then(setHistory);
+  }, [medicalUser]);
+
   const fileKind = useMemo(() => {
     if (!file) return null;
     if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) return "pdf";
     if (file.name.toLowerCase().endsWith(".dcm") || file.name.toLowerCase().endsWith(".dicom")) return "dicom";
     return "image";
   }, [file]);
+  const selectedHistory = useMemo(
+    () => history.find((item) => item.id === selectedHistoryId) ?? null,
+    [history, selectedHistoryId]
+  );
+  const compareItems = useMemo(
+    () =>
+      (compareIds.map((id) => history.find((item) => item.id === id)).filter(Boolean) as UploadHistoryItem[]).sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      ),
+    [compareIds, history]
+  );
+  const comparisonRows = useMemo(() => buildImageComparison(compareItems[0], compareItems[1]), [compareItems]);
+
+  const toggleCompare = (id: number) => {
+    setCompareIds((current) => {
+      if (current.includes(id)) return current.filter((item) => item !== id);
+      return [...current.slice(-1), id];
+    });
+  };
+
+  const handleOpenUploadedFilm = async (item: UploadHistoryItem) => {
+    try {
+      await openUploadFile(item);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không mở được phim xương đã upload");
+    }
+  };
 
   const setSelectedFile = (nextFile: File | null) => {
     if (previewUrl) {
@@ -154,8 +194,10 @@ export function MedicalImageUpload() {
     setResult(null);
 
     try {
+      const token = getMedicalAuthToken();
       const response = await fetch("/api/medical-images/analyze", {
         method: "POST",
+        headers: token ? { authorization: `Bearer ${token}` } : undefined,
         body: formData,
       });
       const data = await response.json();
@@ -163,6 +205,18 @@ export function MedicalImageUpload() {
         throw new Error(data?.detail || "Không phân tích được file");
       }
       setResult(data);
+      try {
+        await saveLatestImageSnapshot(medicalUser, file, {
+          modality,
+          bodyPart: bodyPart.trim() || undefined,
+          result: data,
+        });
+      } catch {
+        // Cache failure should not block the analysis result.
+      }
+      if (medicalUser) {
+        fetchUploadHistory("image").then(setHistory);
+      }
       toast.success("Đã phân tích phim xương");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Có lỗi khi upload file");
@@ -388,6 +442,128 @@ export function MedicalImageUpload() {
             </div>
           </section>
         )}
+
+        {medicalUser && (
+          <section className="rounded-lg border border-border/70 bg-background/70 p-4 shadow-sm sm:p-5">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold">Nhật ký upload phim xương</h2>
+                <p className="text-xs text-muted-foreground">
+                  Các file đã lưu có thể dùng để xem lại kết quả và làm dữ liệu train sau khi được gán nhãn.
+                </p>
+              </div>
+              <Badge variant="outline">{history.length} lần upload</Badge>
+            </div>
+            <div className="mt-4 space-y-2">
+              {history.length === 0 ? (
+                <div className="rounded-md border border-dashed border-border bg-muted/15 p-4 text-sm text-muted-foreground">
+                  Chưa có phim xương nào được lưu cho tài khoản này.
+                </div>
+              ) : (
+                history.slice(0, 8).map((item) => (
+                  <div key={item.id} className="rounded-md border border-border/60 bg-muted/15 p-3">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">{item.filename}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {formatUploadTime(item.created_at)}
+                          {item.modality ? ` • ${item.modality.toUpperCase()}` : ""}
+                          {item.body_part ? ` • ${item.body_part}` : ""}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="w-fit">
+                          {item.usable_for_training ? "Train-ready" : "Không train"}
+                        </Badge>
+                        <Button type="button" size="sm" variant="outline" onClick={() => setSelectedHistoryId(item.id)}>
+                          Xem kết quả
+                        </Button>
+                        <Button type="button" size="sm" variant="outline" onClick={() => handleOpenUploadedFilm(item)}>
+                          Xem phim
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={compareIds.includes(item.id) ? "secondary" : "outline"}
+                          onClick={() => toggleCompare(item.id)}
+                        >
+                          {compareIds.includes(item.id) ? "Đã chọn" : "So sánh"}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {selectedHistory && (
+              <div className="mt-5 rounded-lg border border-border/70 bg-background/80 p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="text-xs font-medium uppercase text-muted-foreground">Kết quả phim đã upload</div>
+                    <h3 className="mt-1 text-base font-semibold">{selectedHistory.filename}</h3>
+                    <p className="mt-1 text-xs text-muted-foreground">{formatUploadTime(selectedHistory.created_at)}</p>
+                  </div>
+                  <Badge variant="outline">{imagePredictionLabel(getImageAnalysis(selectedHistory))}</Badge>
+                </div>
+                {getImageAnalysis(selectedHistory) && (
+                  <>
+                    <div className="mt-4 grid gap-3 md:grid-cols-3">
+                      <Metric label="Nhãn AI" value={imagePredictionLabel(getImageAnalysis(selectedHistory))} />
+                      <Metric label="Độ tin cậy" value={formatConfidence(getImageAnalysis(selectedHistory)?.prediction.confidence)} />
+                      <Metric label="Modality" value={getImageAnalysis(selectedHistory)?.metadata.modality.toUpperCase() || "UNKNOWN"} />
+                      <Metric label="Vùng xương" value={getImageAnalysis(selectedHistory)?.metadata.body_part || "Không rõ"} />
+                      <Metric label="Vùng xương ước tính" value={formatPercent(getImageAnalysis(selectedHistory)?.features.estimated_bone_area_ratio)} />
+                      <Metric label="Độ sắc nét" value={formatNumber(getImageAnalysis(selectedHistory)?.quality.sharpness_laplacian_var)} />
+                    </div>
+                    <div className="mt-4 rounded-md border border-border/60 bg-muted/15 p-3 text-sm">
+                      <div className="font-medium">Ghi chú model</div>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">{getImageAnalysis(selectedHistory)?.prediction.note}</p>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {compareItems.length > 0 && (
+              <div className="mt-5 rounded-lg border border-border/70 bg-background/80 p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-xs font-medium uppercase text-muted-foreground">So sánh 2 lần upload phim</div>
+                    <h3 className="mt-1 text-base font-semibold">
+                      {compareItems.length < 2 ? "Chọn thêm một phim để so sánh" : "Bảng thay đổi kết quả ảnh"}
+                    </h3>
+                  </div>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => setCompareIds([])}>
+                    Bỏ chọn
+                  </Button>
+                </div>
+                {compareItems.length === 2 && (
+                  <div className="mt-4 overflow-x-auto">
+                    <div className="min-w-[760px] rounded-md border border-border/60">
+                      <div className="grid grid-cols-[1fr_1fr_1fr_0.8fr_1.2fr] bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
+                        <div>Thông số</div>
+                        <div>{formatUploadTime(compareItems[0].created_at)}</div>
+                        <div>{formatUploadTime(compareItems[1].created_at)}</div>
+                        <div>Thay đổi</div>
+                        <div>Nhận xét</div>
+                      </div>
+                      {comparisonRows.map((row) => (
+                        <div key={row.key} className="grid grid-cols-[1fr_1fr_1fr_0.8fr_1.2fr] border-t border-border/60 px-3 py-2 text-sm">
+                          <div className="font-medium">{row.name}</div>
+                          <div>{row.previous}</div>
+                          <div>{row.current}</div>
+                          <div className={cn(row.deltaClassName)}>{row.delta}</div>
+                          <div className="text-muted-foreground">{row.note}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+        )}
       </div>
     </div>
   );
@@ -463,6 +639,99 @@ function labelToVietnamese(label: string) {
     other: "bất thường khác",
   };
   return mapping[normalized] || label;
+}
+
+function getImageAnalysis(item: UploadHistoryItem | null): ImageAnalysisResponse | null {
+  if (!item || !item.analysis?.metadata || !item.analysis?.prediction) return null;
+  return item.analysis as unknown as ImageAnalysisResponse;
+}
+
+function buildImageComparison(first?: UploadHistoryItem, second?: UploadHistoryItem) {
+  const previous = getImageAnalysis(first ?? null);
+  const current = getImageAnalysis(second ?? null);
+  if (!previous || !current) return [];
+
+  const rows = [
+    {
+      key: "label",
+      name: "Nhãn AI",
+      previous: imagePredictionLabel(previous),
+      current: imagePredictionLabel(current),
+      note: previous.prediction.top_label === current.prediction.top_label ? "Không đổi nhãn" : "Nhãn AI thay đổi",
+    },
+    {
+      key: "confidence",
+      name: "Độ tin cậy",
+      previous: formatConfidence(previous.prediction.confidence),
+      current: formatConfidence(current.prediction.confidence),
+      ...deltaCell(previous.prediction.confidence, current.prediction.confidence, "Điểm confidence"),
+    },
+    {
+      key: "bone_area",
+      name: "Vùng xương ước tính",
+      previous: formatPercent(previous.features.estimated_bone_area_ratio),
+      current: formatPercent(current.features.estimated_bone_area_ratio),
+      ...deltaCell(previous.features.estimated_bone_area_ratio, current.features.estimated_bone_area_ratio, "Tỷ lệ vùng xương"),
+    },
+    {
+      key: "contrast",
+      name: "Độ tương phản",
+      previous: formatNumber(previous.quality.contrast_std),
+      current: formatNumber(current.quality.contrast_std),
+      ...deltaCell(previous.quality.contrast_std, current.quality.contrast_std, "Chất lượng ảnh"),
+    },
+    {
+      key: "sharpness",
+      name: "Độ sắc nét",
+      previous: formatNumber(previous.quality.sharpness_laplacian_var),
+      current: formatNumber(current.quality.sharpness_laplacian_var),
+      ...deltaCell(previous.quality.sharpness_laplacian_var, current.quality.sharpness_laplacian_var, "Chất lượng ảnh"),
+    },
+    {
+      key: "warnings",
+      name: "Cảnh báo ảnh",
+      previous: String(previous.quality.warnings.length),
+      current: String(current.quality.warnings.length),
+      ...deltaCell(previous.quality.warnings.length, current.quality.warnings.length, "Số cảnh báo chất lượng"),
+    },
+  ];
+
+  return rows.map((row) => ({
+    delta: "-",
+    deltaClassName: "text-muted-foreground",
+    ...row,
+  }));
+}
+
+function deltaCell(previous?: number | null, current?: number | null, note = "Thay đổi") {
+  if (typeof previous !== "number" || typeof current !== "number") {
+    return { delta: "-", deltaClassName: "text-muted-foreground", note };
+  }
+  const delta = current - previous;
+  return {
+    delta: `${delta > 0 ? "+" : ""}${Number(delta.toFixed(3))}`,
+    deltaClassName:
+      delta > 0 ? "text-amber-700" : delta < 0 ? "text-emerald-700" : "text-muted-foreground",
+    note,
+  };
+}
+
+function imagePredictionLabel(result: ImageAnalysisResponse | null) {
+  if (!result) return "Không có dữ liệu";
+  if (result.prediction.top_label) return labelToVietnamese(result.prediction.top_label);
+  return result.prediction.status === "model_prediction" ? "Có dự đoán AI" : "Analysis only";
+}
+
+function formatConfidence(value?: number | null) {
+  return typeof value === "number" ? `${(value * 100).toFixed(2)}%` : "Không có";
+}
+
+function formatPercent(value?: number | null) {
+  return typeof value === "number" ? `${(value * 100).toFixed(2)}%` : "Không có";
+}
+
+function formatNumber(value?: number | null) {
+  return typeof value === "number" ? String(Number(value.toFixed(2))) : "Không có";
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

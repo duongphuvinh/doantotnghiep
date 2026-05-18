@@ -87,3 +87,4 @@ medical-image-backend/models/*
 medical-image-backend/uploads/
 medical-image-backend/data/
 mcp-server/uploads/
+mcp-server/data/uploads/

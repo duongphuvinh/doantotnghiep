@@ -209,6 +209,13 @@ class FusionSignal(BaseModel):
     explanation: str
 
 
+class FusionStructuredReport(BaseModel):
+    nature_and_location: str
+    severity: str
+    comprehensive_assessment: str
+    recommendations: list[str] = Field(default_factory=list)
+
+
 class MultimodalAnalyzeResponse(BaseModel):
     image: ImageAnalysisResponse
     clinical: ClinicalAnalyzeResponse
@@ -220,6 +227,7 @@ class MultimodalAnalyzeResponse(BaseModel):
     confidence: float
     signals: list[FusionSignal]
     explanation: str
+    structured_report: FusionStructuredReport | None = None
     recommended_next_steps: list[str]
     safety_note: str
 
@@ -273,4 +281,24 @@ class PredictionRunCreate(BaseModel):
 class PredictionRunPublic(PredictionRunCreate):
     id: int
     owner_user_id: int
+    created_at: datetime
+
+
+UploadType = Literal["image", "lab"]
+
+
+class UploadRecordPublic(BaseModel):
+    id: int
+    owner_user_id: int
+    upload_type: UploadType
+    filename: str
+    content_type: str | None = None
+    file_path: str | None = None
+    file_size: int | None = None
+    modality: str | None = None
+    body_part: str | None = None
+    source_text: str | None = None
+    analysis: dict
+    label_status: str
+    usable_for_training: bool
     created_at: datetime

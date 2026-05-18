@@ -38,7 +38,9 @@ const getApiKey = (key: string): string | undefined => {
 //   apiKey: getApiKey('OPENAI_API_KEY'),
 // });
 
-const googleClient = createGoogleGenerativeAI({  apiKey: getApiKey('GOOGLE_API_KEY'),});
+const googleClient = createGoogleGenerativeAI({
+  apiKey: getApiKey('GOOGLE_API_KEY') || getApiKey('GEMINI_API_KEY'),
+});
 
 const anthropicClient = createAnthropic({
   apiKey: getApiKey('ANTHROPIC_API_KEY'),
@@ -116,3 +118,31 @@ export type modelID = keyof typeof languageModels;
 export const MODELS = Object.keys(languageModels);
 
 export const defaultModel: modelID = 'gemini-2.5-flash';
+
+export function languageModelWithApiKey(modelId: modelID, apiKeys?: Record<string, string | undefined>) {
+  if (modelId === 'gemini-2.5-flash') {
+    return createGoogleGenerativeAI({
+      apiKey:
+        apiKeys?.GOOGLE_API_KEY ||
+        apiKeys?.GEMINI_API_KEY ||
+        apiKeys?.GOOGLE_GENERATIVE_AI_API_KEY ||
+        process.env.GOOGLE_API_KEY ||
+        process.env.GEMINI_API_KEY ||
+        process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+    })('gemini-2.5-flash');
+  }
+  if (modelId === 'claude-4-sonnet') {
+    return createAnthropic({
+      apiKey: apiKeys?.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY,
+    })('claude-sonnet-4-20250514');
+  }
+  if (modelId === 'qwen-qwq') {
+    return wrapLanguageModel({
+      model: createGroq({
+        apiKey: apiKeys?.GROQ_API_KEY || process.env.GROQ_API_KEY,
+      })('qwen/qwen3-32b'),
+      middleware,
+    });
+  }
+  return model.languageModel(modelId);
+}

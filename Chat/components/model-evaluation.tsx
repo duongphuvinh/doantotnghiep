@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BarChart3, Loader2, Save, Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getMedicalAuthToken } from "@/lib/medical-auth";
+import { fetchUploadHistory, formatUploadTime, type UploadHistoryItem } from "@/lib/upload-history";
 
 type EvaluationResponse = {
   best_model_by_macro_f1?: string | null;
@@ -25,6 +26,18 @@ type EvaluationResponse = {
   }>;
 };
 
+type PredictionRun = {
+  id: number;
+  case_code: string;
+  y_true: string;
+  before_ai_pred?: string | null;
+  image_ai_pred?: string | null;
+  clinical_ai_pred?: string | null;
+  multimodal_pred?: string | null;
+  note?: string | null;
+  created_at: string;
+};
+
 export function ModelEvaluation() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
@@ -37,6 +50,15 @@ export function ModelEvaluation() {
   const [clinicalAi, setClinicalAi] = useState("");
   const [multimodal, setMultimodal] = useState("");
   const [note, setNote] = useState("");
+  const [imageUploads, setImageUploads] = useState<UploadHistoryItem[]>([]);
+  const [labUploads, setLabUploads] = useState<UploadHistoryItem[]>([]);
+  const [savedRuns, setSavedRuns] = useState<PredictionRun[]>([]);
+
+  useEffect(() => {
+    const token = getMedicalAuthToken();
+    if (!token) return;
+    loadUserEvaluationData(token);
+  }, []);
 
   const requireToken = () => {
     const token = getMedicalAuthToken();
@@ -46,6 +68,63 @@ export function ModelEvaluation() {
       return null;
     }
     return token;
+  };
+
+  const loadUserEvaluationData = async (token: string) => {
+    const [images, labs] = await Promise.all([
+      fetchUploadHistory("image"),
+      fetchUploadHistory("lab"),
+    ]);
+    setImageUploads(images);
+    setLabUploads(labs);
+
+    const response = await fetch("/api/evaluation/runs", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (response.ok) {
+      setSavedRuns(await response.json());
+    }
+  };
+
+  const useImageUpload = (item: UploadHistoryItem) => {
+    const analysis = item.analysis as {
+      prediction?: { top_label?: string | null; confidence?: number | null };
+      metadata?: { body_part?: string | null; modality?: string | null };
+    };
+    setCaseCode((current) => current || `IMG-${item.id}`);
+    setImageAi(analysis.prediction?.top_label || "");
+    setNote((current) =>
+      current ||
+      [
+        item.filename,
+        analysis.metadata?.modality ? `modality: ${analysis.metadata.modality}` : "",
+        analysis.metadata?.body_part ? `vùng: ${analysis.metadata.body_part}` : "",
+        typeof analysis.prediction?.confidence === "number"
+          ? `confidence: ${(analysis.prediction.confidence * 100).toFixed(2)}%`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("; ")
+    );
+    toast.success("Đã nạp dự đoán từ phim xương");
+  };
+
+  const useLabUpload = (item: UploadHistoryItem) => {
+    const analysis = item.analysis as {
+      abnormal_count?: number;
+      urgent_count?: number;
+      summary?: string;
+    };
+    const label =
+      Number(analysis.urgent_count || 0) > 0
+        ? "high_risk_lab"
+        : Number(analysis.abnormal_count || 0) > 0
+          ? "abnormal_lab"
+          : "normal_lab";
+    setCaseCode((current) => current || `LAB-${item.id}`);
+    setClinicalAi(label);
+    setNote((current) => current || analysis.summary || item.filename);
+    toast.success("Đã nạp tín hiệu từ phiếu xét nghiệm");
   };
 
   const evaluate = async () => {
@@ -106,6 +185,7 @@ export function ModelEvaluation() {
       const data = await response.json();
       if (!response.ok) throw new Error(data?.detail || "Không lưu được ca đánh giá");
       toast.success("Đã lưu ca đánh giá");
+      loadUserEvaluationData(token);
       setCaseCode("");
       setTruth("");
       setBeforeAi("");
@@ -153,6 +233,58 @@ export function ModelEvaluation() {
           <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
             Ghi nhận từng ca đọc phim để so sánh trước AI, model ảnh xương, dữ liệu lâm sàng/xét nghiệm và fusion đa phương thức.
           </p>
+        </section>
+
+        <section className="rounded-lg border border-border/70 bg-background/70 p-5 shadow-sm">
+          <div>
+            <h2 className="text-lg font-semibold">Dữ liệu đã upload</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Chọn phim hoặc phiếu xét nghiệm đã lưu để điền nhanh dự đoán. Nhãn đúng vẫn cần bác sĩ/người dùng xác nhận trước khi tính metrics.
+            </p>
+          </div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <div className="rounded-md border border-border/60 bg-muted/15 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-medium">Phim xương đã lưu</div>
+                <Badge variant="outline">{imageUploads.length}</Badge>
+              </div>
+              <div className="mt-3 space-y-2">
+                {imageUploads.slice(0, 5).map((item) => (
+                  <div key={item.id} className="flex items-center justify-between gap-3 rounded-md border border-border/60 bg-background/70 p-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">{item.filename}</div>
+                      <div className="text-xs text-muted-foreground">{formatUploadTime(item.created_at)}</div>
+                    </div>
+                    <Button type="button" size="sm" variant="outline" onClick={() => useImageUpload(item)}>
+                      Dùng phim này
+                    </Button>
+                  </div>
+                ))}
+                {imageUploads.length === 0 && <div className="text-sm text-muted-foreground">Chưa có phim xương đã lưu.</div>}
+              </div>
+            </div>
+
+            <div className="rounded-md border border-border/60 bg-muted/15 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-medium">Phiếu xét nghiệm đã lưu</div>
+                <Badge variant="outline">{labUploads.length}</Badge>
+              </div>
+              <div className="mt-3 space-y-2">
+                {labUploads.slice(0, 5).map((item) => (
+                  <div key={item.id} className="flex items-center justify-between gap-3 rounded-md border border-border/60 bg-background/70 p-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">{item.filename}</div>
+                      <div className="text-xs text-muted-foreground">{formatUploadTime(item.created_at)}</div>
+                    </div>
+                    <Button type="button" size="sm" variant="outline" onClick={() => useLabUpload(item)}>
+                      Dùng phiếu này
+                    </Button>
+                  </div>
+                ))}
+                {labUploads.length === 0 && <div className="text-sm text-muted-foreground">Chưa có phiếu xét nghiệm đã lưu.</div>}
+              </div>
+            </div>
+          </div>
         </section>
 
         <section className="rounded-lg border border-border/70 bg-background/70 p-5 shadow-sm">
@@ -218,6 +350,36 @@ export function ModelEvaluation() {
             {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
             Tính metrics từ CSV
           </Button>
+        </section>
+
+        <section className="rounded-lg border border-border/70 bg-background/70 p-5 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">Ca đánh giá đã lưu</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Các ca có nhãn đúng sẽ được dùng để tính Accuracy / Precision / Recall / F1.</p>
+            </div>
+            <Badge variant="outline">{savedRuns.length} ca</Badge>
+          </div>
+          <div className="mt-4 space-y-2">
+            {savedRuns.slice(0, 8).map((run) => (
+              <div key={run.id} className="rounded-md border border-border/60 bg-muted/15 p-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-sm font-medium">{run.case_code}</div>
+                    <div className="text-xs text-muted-foreground">
+                      Nhãn đúng: {run.y_true} • {formatUploadTime(run.created_at)}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {run.image_ai_pred && <Badge variant="outline">Image: {run.image_ai_pred}</Badge>}
+                    {run.clinical_ai_pred && <Badge variant="outline">Lab: {run.clinical_ai_pred}</Badge>}
+                    {run.multimodal_pred && <Badge variant="outline">Fusion: {run.multimodal_pred}</Badge>}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {savedRuns.length === 0 && <div className="text-sm text-muted-foreground">Chưa có ca đánh giá đã lưu.</div>}
+          </div>
         </section>
 
         {result && (
