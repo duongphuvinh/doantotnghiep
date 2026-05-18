@@ -144,6 +144,10 @@ function asksMedicalKnowledge(text: string) {
     'thoai hoa',
     'cot song',
     'dot song',
+    'mang thai',
+    'co thai',
+    'thai ky',
+    'thai nghen',
   ].some((term) => normalized.includes(term));
 }
 
@@ -175,6 +179,18 @@ function asksSymptoms(text: string) {
     normalized.includes('dau hieu') ||
     normalized.includes('bieu hien') ||
     normalized.includes('symptom')
+  );
+}
+
+function asksPregnancy(text: string) {
+  const normalized = normalizeVietnamese(text);
+  return (
+    normalized.includes('mang thai') ||
+    normalized.includes('co thai') ||
+    normalized.includes('thai ky') ||
+    normalized.includes('thai nghen') ||
+    normalized.includes('pregnancy') ||
+    normalized.includes('pregnant')
   );
 }
 
@@ -240,6 +256,20 @@ function generalMedicalFallbackAnswer(question: string) {
       'Hướng xử trí thường gồm nghỉ ngơi khớp đau, chườm lạnh ngắn, uống đủ nước, hạn chế rượu bia và thực phẩm giàu purin. Thuốc giảm viêm/giảm đau hoặc thuốc hạ acid uric cần dùng theo chỉ định bác sĩ, đặc biệt nếu có bệnh thận, dạ dày, tim mạch hoặc đang dùng thuốc khác.',
       '',
       'Bạn nên đi khám nếu đây là cơn đau khớp đầu tiên, đau/sưng nhiều, sốt, khớp đỏ nóng lan rộng, hoặc triệu chứng không cải thiện. Nội dung này chỉ để tham khảo, không thay thế chẩn đoán và điều trị của bác sĩ.',
+    ].join('\n');
+  }
+
+  if (asksPregnancy(question)) {
+    return [
+      'Dấu hiệu thường gặp khi mang thai',
+      '',
+      'Các dấu hiệu sớm có thể gồm trễ kinh, căng tức ngực, buồn nôn hoặc nôn, mệt mỏi, buồn ngủ, đi tiểu nhiều hơn, nhạy cảm với mùi, thay đổi khẩu vị, đầy bụng hoặc đau âm ỉ nhẹ vùng bụng dưới.',
+      '',
+      'Một số người có thể ra ít máu báo thai hoặc đau lâm râm nhẹ, nhưng các dấu hiệu này không đủ để khẳng định chắc chắn vì cũng có thể gặp trong rối loạn kinh nguyệt, stress, thay đổi nội tiết hoặc bệnh lý khác.',
+      '',
+      'Cách kiểm tra thực tế nhất là dùng que thử thai sau khi trễ kinh hoặc sau quan hệ khoảng 10-14 ngày. Nếu cần chắc chắn hơn, xét nghiệm beta-hCG máu và siêu âm theo hẹn giúp xác nhận thai và vị trí thai.',
+      '',
+      'Nên đi khám sớm nếu đau bụng nhiều, ra máu âm đạo nhiều, chóng mặt/ngất, đau một bên bụng dưới, sốt, hoặc que thử thai dương tính kèm đau/ra máu. Nội dung này chỉ để tham khảo, không thay thế tư vấn sản phụ khoa.',
     ].join('\n');
   }
 
@@ -552,7 +582,7 @@ export async function POST(req: Request) {
     );
   }
 
-  if (asksCervicalSpondylosis(lastUserText) || asksGout(lastUserText)) {
+  if (asksCervicalSpondylosis(lastUserText) || asksGout(lastUserText) || asksPregnancy(lastUserText)) {
     return dataStreamTextResponse(generalMedicalFallbackAnswer(lastUserText), id);
   }
 

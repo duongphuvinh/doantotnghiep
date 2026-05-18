@@ -613,6 +613,12 @@ function buildImageConclusion(result: ImageAnalysisResponse) {
     `Ảnh đã được tiền xử lý; vùng xương ước tính ${(result.features.estimated_bone_area_ratio * 100).toFixed(2)}%, độ tương phản ${result.quality.contrast_std}, độ sắc nét ${result.quality.sharpness_laplacian_var}.`,
   ];
 
+  const hasModelCandidate = (result.prediction.probabilities?.length ?? 0) > 0 || (result.prediction.labels?.length ?? 0) > 0;
+  if (hasModelCandidate) {
+    points[0] = "Model AI hiện chưa đủ điều kiện tin cậy để kết luận bệnh lý cụ thể trên ảnh này, nên hệ thống chỉ hiển thị phân tích hỗ trợ.";
+    if (result.prediction.note) points.splice(1, 0, result.prediction.note);
+  }
+
   if (result.quality.warnings.length > 0) {
     points.push(`Cần chú ý chất lượng ảnh: ${result.quality.warnings.join("; ")}.`);
   } else {

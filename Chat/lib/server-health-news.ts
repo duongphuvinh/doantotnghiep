@@ -47,6 +47,10 @@ const MEDICAL_TOPICS = [
     id: "heart_failure",
     aliases: ["suy tim", "heart failure"],
   },
+  {
+    id: "pregnancy",
+    aliases: ["mang thai", "co thai", "thai ky", "thai nghen", "pregnancy", "pregnant"],
+  },
 ];
 
 export function searchHealthNews(query: string, limit = 3): HealthNewsMatch[] {
@@ -228,7 +232,24 @@ function normalizeText(value: string) {
     .toLowerCase();
 }
 
-const QUERY_STOP_WORDS = new Set(["tim", "thong", "tin", "ve", "benh", "benh ly", "la", "gi", "cho", "toi"]);
+const QUERY_STOP_WORDS = new Set([
+  "tim",
+  "thong",
+  "tin",
+  "ve",
+  "benh",
+  "benh ly",
+  "la",
+  "gi",
+  "cho",
+  "toi",
+  "trieu",
+  "chung",
+  "dau",
+  "hieu",
+  "bieu",
+  "hien",
+]);
 
 function tokenize(value: string) {
   return normalizeText(value)
