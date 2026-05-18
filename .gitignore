@@ -38,6 +38,9 @@ postgres_data/
 pgadmin_data/
 
 # Development
+.venv/
+.venv-new/
+.venv-broken/
 .env.development.local
 .env.test.local
 .env.production.local
@@ -83,3 +86,4 @@ medical-image-backend/models/*
 !medical-image-backend/models/lab_reference_nhanes.json
 medical-image-backend/uploads/
 medical-image-backend/data/
+mcp-server/uploads/

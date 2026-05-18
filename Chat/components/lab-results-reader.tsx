@@ -55,6 +55,7 @@ type LabAnalyzeResponse = {
     status: "low" | "normal" | "high" | "positive" | "negative" | "abnormal" | "unknown";
     severity: "info" | "watch" | "attention" | "urgent";
     interpretation: string;
+    body_system?: string | null;
   }>;
   summary: string;
   abnormal_count: number;
@@ -453,6 +454,11 @@ export function LabResultsReader() {
                           Tham khảo: <span className="font-semibold">{item.reference_range}</span>
                         </div>
                       </div>
+                      {item.body_system && (
+                        <div className="mt-2 text-xs font-medium text-foreground/80">
+                          Ảnh hưởng: <span className="font-semibold">{item.body_system}</span>
+                        </div>
+                      )}
                       <p className="mt-2 text-xs leading-5 text-muted-foreground">{item.interpretation}</p>
                     </div>
                   ))}

@@ -332,7 +332,7 @@ export function ChatSidebar() {
                             title={isCollapsed ? "Upload phim xương" : undefined}
                         >
                             <ImageUp className={`${isCollapsed ? "" : "mr-2"} h-4 w-4`} />
-                            {!isCollapsed && <span>Upload phim</span>}
+                            {!isCollapsed && <span>Upload phim xương</span>}
                         </Button>
                     </motion.div>
 

@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "backend:dev": "python scripts/run_backend.py --reload",
+    "backend:test": "python -m pytest -q",
+    "backend:train-demo": "python scripts/create_demo_bone_dataset.py --out-dir examples/demo_bone_dataset --samples-per-class 96 --size 512 --seed 42 && python scripts/train_bone_feature_model.py --data-dir examples/demo_bone_dataset --out-dir models/bone_feature_demo --test-size 0.2 --seed 42 --k 3"
   },
   "dependencies": {
     "@ai-sdk/google": "^1.2.22",

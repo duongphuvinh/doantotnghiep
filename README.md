@@ -6,7 +6,7 @@ A full-stack chat application integrating AI models and the Model Context Protoc
 
 ```
 ├── Chat/              # Next.js frontend application
-├── mcp-server/        # MCP server implementation
+├── mcp-server/        # MCP server + FastAPI medical backend
 ├── postgres/          # PostgreSQL database with pgvector
 └── tool/              # Utility tools and helpers
 ```
@@ -71,6 +71,13 @@ npm install
 npm run dev
 ```
 
+#### Medical FastAPI Backend (Port 8000)
+```bash
+cd ../mcp-server
+.\scripts\setup_backend.ps1
+.\.venv\Scripts\python.exe scripts\run_backend.py --reload
+```
+
 ## Database Setup
 
 Run database migrations in the Chat directory:
@@ -120,6 +127,8 @@ npm start
 - `npm run build` - Build for production
 - `npm start` - Start production server
 - `npm run lint` - Run ESLint
+- `npm run backend:dev` - Start FastAPI medical backend after Python deps are installed
+- `npm run backend:test` - Run Python backend tests
 
 ## Technologies Used
 
@@ -135,6 +144,8 @@ npm start
 - Next.js 16
 - Model Context Protocol SDK
 - Google Generative AI
+- FastAPI medical image/lab backend
+- Python image processing and lightweight model inference
 
 ### Database
 - PostgreSQL 16
@@ -154,6 +165,7 @@ npm start
 |---------|------|-----|
 | Chat Application | 3001 | http://localhost:3001 |
 | MCP Server | 3000 | http://localhost:3000 |
+| Medical FastAPI Backend | 8000 | http://localhost:8000/docs |
 | PostgreSQL | 5432 | localhost:5432 |
 | pgAdmin | 5050 | http://localhost:5050 |
 

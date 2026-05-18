@@ -394,9 +394,16 @@ export function MedicalImageUpload() {
 }
 
 function buildImageConclusion(result: ImageAnalysisResponse) {
-  const confidence = typeof result.prediction.confidence === "number"
-    ? `${(result.prediction.confidence * 100).toFixed(2)}%`
-    : null;
+  const confidenceValue = typeof result.prediction.confidence === "number" ? result.prediction.confidence : null;
+  const confidence = confidenceValue !== null ? `${(confidenceValue * 100).toFixed(2)}%` : null;
+  const confidenceBand =
+    confidenceValue === null
+      ? null
+      : confidenceValue >= 0.75
+        ? "cao"
+        : confidenceValue >= 0.5
+          ? "trung bình"
+          : "thấp";
 
   if (result.prediction.status === "model_prediction" && result.prediction.top_label) {
     const label = result.prediction.top_label;
@@ -410,10 +417,16 @@ function buildImageConclusion(result: ImageAnalysisResponse) {
       level: confidence ? `Độ tin cậy ${confidence}` : "Có model AI",
       className: isNormal
         ? "border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-700/40 dark:bg-emerald-900/20 dark:text-emerald-100"
-        : "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-100",
+        : confidenceValue !== null && confidenceValue < 0.5
+          ? "border-rose-200 bg-rose-50 text-rose-950 dark:border-rose-700/40 dark:bg-rose-900/20 dark:text-rose-100"
+          : "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-100",
       points: [
-        `Nhãn AI: ${label}${confidence ? `, confidence ${confidence}` : ""}.`,
-        "Cần đối chiếu vị trí đau, triệu chứng, tiền sử chấn thương và kết luận của bác sĩ/chẩn đoán hình ảnh.",
+        `Nhãn AI: ${label}${confidence ? `, confidence ${confidence}` : ""}${confidenceBand ? `, mức chắc chắn ${confidenceBand}` : ""}.`,
+        confidenceValue !== null && confidenceValue < 0.5
+          ? "Độ tin cậy thấp: kết quả này chỉ nên xem như tín hiệu gợi ý, chưa đủ mạnh để kết luận trên một phim đơn lẻ."
+          : "Kết quả có thể dùng để định hướng đọc phim, nhưng vẫn cần kiểm chứng trên phim gốc.",
+        "Cần đối chiếu vị trí đau, điểm đau khu trú, sưng/nề, biến dạng, khả năng vận động, tiền sử chấn thương và thời điểm chụp.",
+        "Nên kiểm tra thêm đường vỏ xương, khe khớp, trục xương, vùng mô mềm và so sánh với tư thế/chụp bổ sung nếu nghi ngờ.",
         result.safety_note,
       ],
     };

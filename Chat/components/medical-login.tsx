@@ -127,7 +127,7 @@ export function MedicalLogin() {
               <div className="text-xs opacity-80">Role: {currentUser.role}</div>
               <div className="mt-4 flex flex-wrap gap-2">
                 <Button type="button" size="sm" onClick={() => router.push("/medical-images")}>
-                  Upload phim
+                  Upload phim xương
                 </Button>
                 <Button type="button" size="sm" variant="outline" onClick={verifySession} disabled={isLoading}>
                   Kiểm tra phiên

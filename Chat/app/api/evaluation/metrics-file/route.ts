@@ -1,4 +1,4 @@
-export const runtime = "nodejs";
+﻿export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const DEFAULT_BACKEND_URL = "http://localhost:8000";
@@ -12,7 +12,7 @@ export async function POST(req: Request) {
   const authorization = req.headers.get("authorization");
   if (!authorization) {
     return Response.json(
-      { detail: "Vui lòng đăng nhập trước khi đánh giá mô hình" },
+      { detail: "Vui lÃ²ng Ä‘Äƒng nháº­p trÆ°á»›c khi Ä‘Ã¡nh giÃ¡ mÃ´ hÃ¬nh" },
       { status: 401 }
     );
   }
@@ -31,13 +31,15 @@ export async function POST(req: Request) {
     return Response.json(
       {
         detail:
-          "Không kết nối được backend evaluation ở " +
-          `${backendUrl}. Hãy chạy medical-image-backend bằng lệnh: ` +
+          "KhÃ´ng káº¿t ná»‘i Ä‘Æ°á»£c backend evaluation á»Ÿ " +
+          `${backendUrl}. HÃ£y cháº¡y backend trong thÆ° má»¥c mcp-server báº±ng lá»‡nh: ` +
           "`uvicorn app.main:app --reload --port 8000`. " +
-          (error instanceof Error ? `Chi tiết: ${error.message}` : ""),
+          (error instanceof Error ? `Chi tiáº¿t: ${error.message}` : ""),
       },
       { status: 502 }
     );
   }
 }
+
+
 
