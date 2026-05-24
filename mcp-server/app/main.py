@@ -8,10 +8,12 @@ from io import StringIO
 from pathlib import Path
 from uuid import uuid4
 
+import numpy as np
 from fastapi import Depends
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials
+from PIL import Image
 
 from .clinical import ClinicalDataProcessor
 from .config import get_settings
@@ -42,6 +44,8 @@ from .schemas import (
     PatientPublic,
     PredictionRunCreate,
     PredictionRunPublic,
+    UploadDuplicateInfo,
+    UploadDuplicateMatch,
     UploadRecordPublic,
     UserCreate,
     UserLogin,
@@ -150,11 +154,14 @@ def _upload_record_public(row: dict) -> UploadRecordPublic:
     return UploadRecordPublic(
         id=int(row["id"]),
         owner_user_id=int(row["owner_user_id"]),
+        patient_id=int(row["patient_id"]) if row.get("patient_id") is not None else None,
         upload_type=row["upload_type"],
         filename=row["filename"],
         content_type=row["content_type"],
         file_path=row["file_path"],
         file_size=row["file_size"],
+        file_hash=row.get("file_hash"),
+        image_hash=row.get("image_hash"),
         modality=row["modality"],
         body_part=row["body_part"],
         source_text=row["source_text"],
@@ -177,6 +184,97 @@ def _payload_dict(payload: object) -> dict:
     return json.loads(payload.json())  # type: ignore[attr-defined]
 
 
+def _content_sha256(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def _text_sha256(text: str) -> str:
+    normalized = "\n".join(line.strip() for line in text.strip().splitlines() if line.strip())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _dhash(image: np.ndarray) -> str:
+    arr = image.astype(np.float32)
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return ""
+    low, high = float(finite.min()), float(finite.max())
+    if high > low:
+        arr = (np.clip(arr, low, high) - low) / (high - low)
+    else:
+        arr = np.zeros(arr.shape, dtype=np.float32)
+    small = np.array(Image.fromarray((arr * 255).astype(np.uint8)).resize((9, 8)))
+    bits = small[:, 1:] > small[:, :-1]
+    value = 0
+    for bit in bits.flatten():
+        value = (value << 1) | int(bool(bit))
+    return f"{value:016x}"
+
+
+def _hash_distance(left: str | None, right: str | None) -> int | None:
+    if not left or not right:
+        return None
+    try:
+        return (int(left, 16) ^ int(right, 16)).bit_count()
+    except ValueError:
+        return None
+
+
+def _duplicate_match(row: dict, distance: int | None = None) -> UploadDuplicateMatch:
+    return UploadDuplicateMatch(
+        id=int(row["id"]),
+        filename=row["filename"],
+        created_at=row["created_at"],
+        patient_id=int(row["patient_id"]) if row.get("patient_id") is not None else None,
+        upload_type=row["upload_type"],
+        distance=distance,
+    )
+
+
+def _exact_duplicate_info(row: dict) -> UploadDuplicateInfo:
+    return UploadDuplicateInfo(
+        exact=True,
+        near=False,
+        message="File này đã được upload trước đó nên hệ thống không tạo thêm bản ghi mới.",
+        matched_record=_duplicate_match(row),
+    )
+
+
+def _near_duplicate_info(row: dict, distance: int) -> UploadDuplicateInfo:
+    return UploadDuplicateInfo(
+        exact=False,
+        near=True,
+        message="Ảnh này rất giống một phim xương đã upload trước đó. Hệ thống vẫn lưu như một bản mới để bác sĩ đối chiếu.",
+        matched_record=_duplicate_match(row, distance),
+    )
+
+
+def _find_near_image_duplicate(
+    current_user: CurrentUser,
+    patient_id: int | None,
+    image_hash: str,
+    threshold: int = 6,
+) -> tuple[dict, int] | None:
+    best: tuple[dict, int] | None = None
+    for row in database.find_image_hash_candidates(current_user.id, current_user.role, patient_id):
+        distance = _hash_distance(image_hash, row.get("image_hash"))
+        if distance is None or distance > threshold:
+            continue
+        if best is None or distance < best[1]:
+            best = (row, distance)
+    return best
+
+
+def _ensure_patient_id_access(patient_id: int | None, current_user: CurrentUser) -> int | None:
+    if patient_id is None:
+        return None
+    patient = database.get_patient_by_id(patient_id)
+    if patient is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    ensure_patient_access(patient, current_user)
+    return patient_id
+
+
 def _save_upload_bytes(content: bytes, filename: str, upload_type: str, user_id: int) -> str:
     safe_name = Path(filename).name or "upload"
     ext = Path(safe_name).suffix.lower()
@@ -193,7 +291,10 @@ def get_optional_current_user(
 ) -> CurrentUser | None:
     if credentials is None or credentials.scheme.lower() != "bearer":
         return None
-    user_id = verify_access_token(credentials.credentials)
+    try:
+        user_id = verify_access_token(credentials.credentials)
+    except HTTPException:
+        return None
     row = database.get_user_by_id(user_id)
     if row is None:
         return None
@@ -246,6 +347,8 @@ def _image_analysis_response(
             "Kết quả AI chỉ hỗ trợ sàng lọc và tham khảo ban đầu, không phải chẩn đoán độc lập. "
             "Cần bác sĩ/chuyên khoa chẩn đoán hình ảnh đối chiếu phim gốc, vị trí đau, khám lâm sàng và tiền sử chấn thương."
         ),
+        file_hash=_content_sha256(content),
+        image_hash=_dhash(image),
     )
 
 
@@ -378,14 +481,32 @@ def analyze_lab_results(
     payload: LabAnalyzeRequest,
     current_user: CurrentUser = Depends(get_current_user),
 ) -> LabAnalyzeResponse:
+    patient_id = _ensure_patient_id_access(payload.patient_id, current_user)
     result = lab_processor.analyze(payload)
+    source_text = payload.raw_text or "\n".join(
+        f"{item.name} {item.value} {item.unit or ''}".strip() for item in payload.values
+    )
+    file_hash = _text_sha256(source_text)
+    result.file_hash = file_hash
+    duplicate = database.find_upload_by_file_hash(
+        current_user.id,
+        current_user.role,
+        "lab",
+        patient_id,
+        file_hash,
+    )
+    if duplicate is not None:
+        result.duplicate = _exact_duplicate_info(duplicate)
+        return result
     database.create_upload_record(
         current_user.id,
         {
+            "patient_id": patient_id,
             "upload_type": "lab",
             "filename": "manual-lab-input.txt",
             "content_type": "text/plain",
-            "source_text": payload.raw_text,
+            "file_hash": file_hash,
+            "source_text": source_text,
             "analysis": _payload_dict(result),
             "usable_for_training": True,
         },
@@ -398,8 +519,10 @@ async def analyze_lab_results_file(
     file: UploadFile = File(...),
     age: int | None = Form(None),
     gender: str = Form("unknown"),
+    patient_id: int | None = Form(None),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> LabAnalyzeResponse:
+    patient_id = _ensure_patient_id_access(patient_id, current_user)
     content = await file.read()
     max_bytes = settings.max_upload_mb * 1024 * 1024
     if len(content) > max_bytes:
@@ -416,15 +539,29 @@ async def analyze_lab_results_file(
         raw_text=raw_text,
     )
     result = lab_processor.analyze(payload)
+    file_hash = _content_sha256(content)
+    result.file_hash = file_hash
+    duplicate = database.find_upload_by_file_hash(
+        current_user.id,
+        current_user.role,
+        "lab",
+        patient_id,
+        file_hash,
+    )
+    if duplicate is not None:
+        result.duplicate = _exact_duplicate_info(duplicate)
+        return result
     stored_path = _save_upload_bytes(content, file.filename or "lab-file", "lab", current_user.id)
     database.create_upload_record(
         current_user.id,
         {
+            "patient_id": patient_id,
             "upload_type": "lab",
             "filename": file.filename or "lab-file",
             "content_type": file.content_type,
             "file_path": stored_path,
             "file_size": len(content),
+            "file_hash": file_hash,
             "source_text": raw_text,
             "analysis": _payload_dict(result),
             "usable_for_training": True,
@@ -546,10 +683,17 @@ def evaluate_saved_prediction_runs(
 @app.get("/api/uploads", response_model=list[UploadRecordPublic])
 def list_upload_records(
     upload_type: str | None = None,
+    patient_id: int | None = None,
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[UploadRecordPublic]:
     normalized_type = upload_type if upload_type in {"image", "lab"} else None
-    rows = database.list_upload_records(current_user.id, current_user.role, normalized_type)
+    normalized_patient_id = _ensure_patient_id_access(patient_id, current_user)
+    rows = database.list_upload_records(
+        current_user.id,
+        current_user.role,
+        normalized_type,
+        normalized_patient_id,
+    )
     return [_upload_record_public(row) for row in rows]
 
 
@@ -562,7 +706,13 @@ def get_upload_file(
     if row is None:
         raise HTTPException(status_code=404, detail="Upload record not found")
     if current_user.role != "admin" and int(row["owner_user_id"]) != current_user.id:
-        raise HTTPException(status_code=403, detail="You cannot access this upload")
+        patient_id = row.get("patient_id")
+        if patient_id is None:
+            raise HTTPException(status_code=403, detail="You cannot access this upload")
+        patient = database.get_patient_by_id(int(patient_id))
+        if patient is None:
+            raise HTTPException(status_code=403, detail="You cannot access this upload")
+        ensure_patient_access(patient, current_user)
     file_path = row.get("file_path")
     if not file_path:
         raise HTTPException(status_code=404, detail="Uploaded file is not available")
@@ -581,6 +731,7 @@ async def analyze_image(
     file: UploadFile = File(...),
     modality: Modality = Form("unknown"),
     body_part: str | None = Form(None),
+    patient_id: int | None = Form(None),
     current_user: CurrentUser | None = Depends(get_optional_current_user),
 ) -> ImageAnalysisResponse:
     content = await file.read()
@@ -595,15 +746,34 @@ async def analyze_image(
         body_part=body_part,
     )
     if current_user is not None:
+        patient_id = _ensure_patient_id_access(patient_id, current_user)
+        file_hash = result.file_hash or _content_sha256(content)
+        image_hash = result.image_hash
+        duplicate = database.find_upload_by_file_hash(
+            current_user.id,
+            current_user.role,
+            "image",
+            patient_id,
+            file_hash,
+        )
+        if duplicate is not None:
+            result.duplicate = _exact_duplicate_info(duplicate)
+            return result
+        near_duplicate = _find_near_image_duplicate(current_user, patient_id, image_hash or "")
+        if near_duplicate is not None:
+            result.duplicate = _near_duplicate_info(near_duplicate[0], near_duplicate[1])
         stored_path = _save_upload_bytes(content, file.filename or "upload", "image", current_user.id)
         database.create_upload_record(
             current_user.id,
             {
+                "patient_id": patient_id,
                 "upload_type": "image",
                 "filename": file.filename or "upload",
                 "content_type": file.content_type,
                 "file_path": stored_path,
                 "file_size": len(content),
+                "file_hash": file_hash,
+                "image_hash": image_hash,
                 "modality": result.metadata.modality,
                 "body_part": result.metadata.body_part,
                 "analysis": _payload_dict(result),

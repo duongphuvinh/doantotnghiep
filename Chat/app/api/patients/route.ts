@@ -10,19 +10,13 @@ export async function GET(req: Request) {
     DEFAULT_BACKEND_URL;
   const authorization = req.headers.get("authorization");
   if (!authorization) {
-    return Response.json({ detail: "Vui lòng đăng nhập để xem nhật ký upload" }, { status: 401 });
+    return Response.json({ detail: "Vui lòng đăng nhập để xem hồ sơ người bệnh" }, { status: 401 });
   }
 
-  const sourceUrl = new URL(req.url);
-  const targetUrl = new URL(`${backendUrl.replace(/\/$/, "")}/api/uploads`);
-  const uploadType = sourceUrl.searchParams.get("upload_type");
-  if (uploadType) targetUrl.searchParams.set("upload_type", uploadType);
-  const patientId = sourceUrl.searchParams.get("patient_id");
-  if (patientId) targetUrl.searchParams.set("patient_id", patientId);
-
   try {
-    const response = await fetch(targetUrl, {
+    const response = await fetch(`${backendUrl.replace(/\/$/, "")}/api/patients`, {
       headers: { authorization },
+      cache: "no-store",
     });
     const contentType = response.headers.get("content-type") || "application/json";
     const body = await response.text();
@@ -34,7 +28,7 @@ export async function GET(req: Request) {
     return Response.json(
       {
         detail:
-          "Không kết nối được backend nhật ký upload ở " +
+          "Không kết nối được backend hồ sơ người bệnh ở " +
           `${backendUrl}. Hãy chạy backend trong thư mục mcp-server. ` +
           (error instanceof Error ? `Chi tiết: ${error.message}` : ""),
       },

@@ -27,9 +27,25 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { getMedicalAuthToken, getMedicalAuthUser, type MedicalUser } from "@/lib/medical-auth";
+import {
+  clearMedicalAuthSession,
+  getMedicalAuthToken,
+  getMedicalAuthUser,
+  type MedicalUser,
+} from "@/lib/medical-auth";
 import { saveLatestImageSnapshot } from "@/lib/medical-fusion-cache";
-import { fetchUploadHistory, formatUploadTime, openUploadFile, type UploadHistoryItem } from "@/lib/upload-history";
+import {
+  fetchPatients,
+  fetchUploadHistory,
+  formatUploadTime,
+  openUploadFile,
+  patientDisplayName,
+  sha256File,
+  uploadDuplicateKey,
+  type PatientOption,
+  type UploadDuplicateInfo,
+  type UploadHistoryItem,
+} from "@/lib/upload-history";
 import { cn } from "@/lib/utils";
 
 type Modality = "xray" | "ct" | "mri" | "unknown";
@@ -76,7 +92,20 @@ type ImageAnalysisResponse = {
     note: string;
   };
   safety_note: string;
+  file_hash?: string | null;
+  image_hash?: string | null;
+  duplicate?: UploadDuplicateInfo | null;
 };
+
+async function readJsonResponse(response: Response) {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { detail: text };
+  }
+}
 
 const allowedExtensions = [".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".dcm", ".dicom", ".pdf"];
 const maxFileSizeMb = 25;
@@ -92,9 +121,12 @@ export function MedicalImageUpload() {
   const [isUploading, setIsUploading] = useState(false);
   const [result, setResult] = useState<ImageAnalysisResponse | null>(null);
   const [medicalUser, setMedicalUser] = useState<MedicalUser | null>(null);
+  const [patients, setPatients] = useState<PatientOption[]>([]);
+  const [selectedPatientId, setSelectedPatientId] = useState<string>("none");
   const [history, setHistory] = useState<UploadHistoryItem[]>([]);
   const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
   const [compareIds, setCompareIds] = useState<number[]>([]);
+  const [sessionUploadHashes, setSessionUploadHashes] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     const refreshUser = () => setMedicalUser(getMedicalAuthUser());
@@ -106,10 +138,18 @@ export function MedicalImageUpload() {
   useEffect(() => {
     if (!medicalUser) {
       setHistory([]);
+      setPatients([]);
+      setSelectedPatientId("none");
       return;
     }
-    fetchUploadHistory("image").then(setHistory);
+    fetchPatients().then(setPatients);
   }, [medicalUser]);
+
+  useEffect(() => {
+    if (!medicalUser) return;
+    const patientId = selectedPatientId === "none" ? null : Number(selectedPatientId);
+    fetchUploadHistory("image", patientId).then(setHistory);
+  }, [medicalUser, selectedPatientId]);
 
   const fileKind = useMemo(() => {
     if (!file) return null;
@@ -183,11 +223,27 @@ export function MedicalImageUpload() {
       return;
     }
 
+    const patientId = selectedPatientId === "none" ? null : Number(selectedPatientId);
+    const fileHash = await sha256File(file);
+    const duplicateKey = uploadDuplicateKey("image", patientId, fileHash);
+    const existingRecord = history.find((item) => item.file_hash === fileHash);
+    if (sessionUploadHashes.has(duplicateKey) || existingRecord) {
+      toast.info(
+        existingRecord
+          ? `Phim này đã được upload trước đó: ${existingRecord.filename} (${formatUploadTime(existingRecord.created_at)}).`
+          : "Phim này vừa được upload trong phiên hiện tại, hệ thống không tạo thêm bản ghi mới."
+      );
+      return;
+    }
+
     const formData = new FormData();
     formData.append("file", file);
     formData.append("modality", modality);
     if (bodyPart.trim()) {
       formData.append("body_part", bodyPart.trim());
+    }
+    if (selectedPatientId !== "none") {
+      formData.append("patient_id", selectedPatientId);
     }
 
     setIsUploading(true);
@@ -200,8 +256,13 @@ export function MedicalImageUpload() {
         headers: token ? { authorization: `Bearer ${token}` } : undefined,
         body: formData,
       });
-      const data = await response.json();
+      const data = await readJsonResponse(response);
       if (!response.ok) {
+        if (response.status === 401 && token) {
+          clearMedicalAuthSession();
+          setMedicalUser(null);
+          throw new Error("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để lưu lịch sử upload.");
+        }
         throw new Error(data?.detail || "Không phân tích được file");
       }
       setResult(data);
@@ -215,9 +276,17 @@ export function MedicalImageUpload() {
         // Cache failure should not block the analysis result.
       }
       if (medicalUser) {
-        fetchUploadHistory("image").then(setHistory);
+        fetchUploadHistory("image", patientId).then(setHistory);
       }
-      toast.success("Đã phân tích phim xương");
+      if (data?.duplicate?.exact) {
+        toast.info(data.duplicate.message || "File này đã được upload trước đó, hệ thống không tạo thêm bản ghi mới.");
+      } else if (data?.duplicate?.near) {
+        toast.warning(data.duplicate.message || "Ảnh này rất giống một phim xương đã upload trước đó.");
+        setSessionUploadHashes((current) => new Set(current).add(duplicateKey));
+      } else {
+        setSessionUploadHashes((current) => new Set(current).add(duplicateKey));
+        toast.success("Đã phân tích phim xương");
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Có lỗi khi upload file");
     } finally {
@@ -334,6 +403,25 @@ export function MedicalImageUpload() {
 
           <section className="rounded-lg border border-border/70 bg-background/70 p-4 shadow-sm sm:p-5">
             <div className="space-y-4">
+              {medicalUser && (
+                <div className="grid gap-2">
+                  <Label>Chọn hồ sơ người bệnh</Label>
+                  <Select value={selectedPatientId} onValueChange={setSelectedPatientId}>
+                    <SelectTrigger className="w-full border border-border/70 bg-background">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Không gắn hồ sơ</SelectItem>
+                      {patients.map((patient) => (
+                        <SelectItem key={patient.id} value={String(patient.id)}>
+                          {patientDisplayName(patient)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               <div className="grid gap-2">
                 <Label>Loại phim</Label>
                 <Select value={modality} onValueChange={(value) => setModality(value as Modality)}>
@@ -385,6 +473,21 @@ export function MedicalImageUpload() {
                 {statusBadge.label}
               </Badge>
             </div>
+
+            {result.duplicate && (result.duplicate.exact || result.duplicate.near) && (
+              <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-100">
+                <div className="flex items-center gap-2 font-medium">
+                  <AlertTriangle className="h-4 w-4" />
+                  {result.duplicate.exact ? "File đã được upload trước đó" : "Ảnh gần giống phim đã upload"}
+                </div>
+                <p className="mt-1 text-xs leading-5">
+                  {result.duplicate.message}
+                  {result.duplicate.matched_record
+                    ? ` Trùng/gần giống với ${result.duplicate.matched_record.filename} (${formatUploadTime(result.duplicate.matched_record.created_at)}).`
+                    : ""}
+                </p>
+              </div>
+            )}
 
             <div className="mt-5 grid gap-4 md:grid-cols-3">
               <Metric label="Kích thước xử lý" value={`${result.metadata.width} x ${result.metadata.height}`} />
@@ -469,6 +572,7 @@ export function MedicalImageUpload() {
                           {formatUploadTime(item.created_at)}
                           {item.modality ? ` • ${item.modality.toUpperCase()}` : ""}
                           {item.body_part ? ` • ${item.body_part}` : ""}
+                          {item.patient_id ? ` • ${patientDisplayName(patients.find((patient) => patient.id === item.patient_id))}` : ""}
                         </div>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">

@@ -2,13 +2,30 @@
 
 import { getMedicalAuthToken } from "@/lib/medical-auth";
 
+export type UploadDuplicateInfo = {
+  exact: boolean;
+  near: boolean;
+  message?: string | null;
+  matched_record?: {
+    id: number;
+    filename: string;
+    created_at: string;
+    patient_id?: number | null;
+    upload_type: "image" | "lab" | string;
+    distance?: number | null;
+  } | null;
+};
+
 export type UploadHistoryItem = {
   id: number;
   upload_type: "image" | "lab";
+  patient_id?: number | null;
   filename: string;
   content_type?: string | null;
   file_path?: string | null;
   file_size?: number | null;
+  file_hash?: string | null;
+  image_hash?: string | null;
   modality?: string | null;
   body_part?: string | null;
   source_text?: string | null;
@@ -18,14 +35,51 @@ export type UploadHistoryItem = {
   created_at: string;
 };
 
-export async function fetchUploadHistory(uploadType: "image" | "lab") {
+export type PatientOption = {
+  id: number;
+  patient_code: string;
+  full_name: string;
+  age: number;
+  gender: "male" | "female" | "other" | "unknown";
+  created_at: string;
+};
+
+export async function fetchUploadHistory(uploadType: "image" | "lab", patientId?: number | null) {
   const token = getMedicalAuthToken();
   if (!token) return [];
-  const response = await fetch(`/api/uploads?upload_type=${uploadType}`, {
+  const params = new URLSearchParams({ upload_type: uploadType });
+  if (patientId) params.set("patient_id", String(patientId));
+  const response = await fetch(`/api/uploads?${params.toString()}`, {
     headers: { authorization: `Bearer ${token}` },
   });
   if (!response.ok) return [];
   return (await response.json()) as UploadHistoryItem[];
+}
+
+export async function fetchPatients() {
+  const token = getMedicalAuthToken();
+  if (!token) return [];
+  const response = await fetch("/api/patients", {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) return [];
+  return (await response.json()) as PatientOption[];
+}
+
+export function patientDisplayName(patient?: PatientOption | null) {
+  if (!patient) return "Chưa gắn hồ sơ";
+  return `${patient.patient_code} - ${patient.full_name}`;
+}
+
+export async function sha256File(file: File) {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export function uploadDuplicateKey(uploadType: "image" | "lab", patientId: number | null, fileHash: string) {
+  return `${uploadType}:${patientId ?? "none"}:${fileHash}`;
 }
 
 export async function openUploadFile(item: UploadHistoryItem) {

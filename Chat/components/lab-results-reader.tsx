@@ -31,7 +31,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { normalizeLabAnalyzeResponse } from "@/lib/lab-result-normalizer";
 import { getMedicalAuthToken, getMedicalAuthUser, type MedicalUser } from "@/lib/medical-auth";
 import { saveLatestLabSnapshot } from "@/lib/medical-fusion-cache";
-import { fetchUploadHistory, formatUploadTime, openUploadFile, type UploadHistoryItem } from "@/lib/upload-history";
+import {
+  fetchPatients,
+  fetchUploadHistory,
+  formatUploadTime,
+  openUploadFile,
+  patientDisplayName,
+  sha256File,
+  uploadDuplicateKey,
+  type PatientOption,
+  type UploadDuplicateInfo,
+  type UploadHistoryItem,
+} from "@/lib/upload-history";
 import { cn } from "@/lib/utils";
 
 type Gender = "male" | "female" | "other" | "unknown";
@@ -66,7 +77,19 @@ type LabAnalyzeResponse = {
   safety_note: string;
   raw_text_preview?: string | null;
   unrecognized_lines?: string[];
+  file_hash?: string | null;
+  duplicate?: UploadDuplicateInfo | null;
 };
+
+async function readJsonResponse(response: Response) {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { detail: text };
+  }
+}
 
 const commonBlood = [
   ["WBC", "10^9/L"],
@@ -96,6 +119,8 @@ const commonUrine = [
 export function LabResultsReader() {
   const router = useRouter();
   const [medicalUser, setMedicalUser] = useState<MedicalUser | null>(null);
+  const [patients, setPatients] = useState<PatientOption[]>([]);
+  const [selectedPatientId, setSelectedPatientId] = useState<string>("none");
   const [age, setAge] = useState("");
   const [gender, setGender] = useState<Gender>("unknown");
   const [rawText, setRawText] = useState("");
@@ -103,6 +128,7 @@ export function LabResultsReader() {
   const [history, setHistory] = useState<UploadHistoryItem[]>([]);
   const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
   const [compareIds, setCompareIds] = useState<number[]>([]);
+  const [sessionUploadHashes, setSessionUploadHashes] = useState<Set<string>>(() => new Set());
   const [rows, setRows] = useState<LabInputRow[]>([
     { id: crypto.randomUUID(), category: "blood", name: "WBC", value: "", unit: "10^9/L" },
     { id: crypto.randomUUID(), category: "blood", name: "HGB", value: "", unit: "g/dL" },
@@ -121,10 +147,18 @@ export function LabResultsReader() {
   useEffect(() => {
     if (!medicalUser) {
       setHistory([]);
+      setPatients([]);
+      setSelectedPatientId("none");
       return;
     }
-    fetchUploadHistory("lab").then(setHistory);
+    fetchPatients().then(setPatients);
   }, [medicalUser]);
+
+  useEffect(() => {
+    if (!medicalUser) return;
+    const patientId = selectedPatientId === "none" ? null : Number(selectedPatientId);
+    fetchUploadHistory("lab", patientId).then(setHistory);
+  }, [medicalUser, selectedPatientId]);
 
   const abnormalItems = useMemo(
     () => result?.items.filter((item) => ["low", "high", "positive", "abnormal"].includes(item.status)) ?? [],
@@ -215,13 +249,14 @@ export function LabResultsReader() {
           authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
+          patient_id: selectedPatientId === "none" ? undefined : Number(selectedPatientId),
           age: age ? Number(age) : undefined,
           gender,
           values,
           raw_text: rawText.trim() || undefined,
         }),
       });
-      const data = await response.json();
+      const data = await readJsonResponse(response);
       if (!response.ok) {
         throw new Error(data?.detail || "Không đọc được kết quả xét nghiệm");
       }
@@ -236,8 +271,13 @@ export function LabResultsReader() {
         gender,
         result: normalized,
       });
-      fetchUploadHistory("lab").then(setHistory);
-      toast.success("Đã đọc kết quả xét nghiệm");
+      const patientId = selectedPatientId === "none" ? null : Number(selectedPatientId);
+      fetchUploadHistory("lab", patientId).then(setHistory);
+      if (normalized.duplicate?.exact) {
+        toast.info(normalized.duplicate.message || "Phiếu xét nghiệm này đã được lưu trước đó.");
+      } else {
+        toast.success("Đã đọc kết quả xét nghiệm");
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Có lỗi khi đọc xét nghiệm");
     } finally {
@@ -268,10 +308,24 @@ export function LabResultsReader() {
       return;
     }
 
+    const patientId = selectedPatientId === "none" ? null : Number(selectedPatientId);
+    const fileHash = await sha256File(labFile);
+    const duplicateKey = uploadDuplicateKey("lab", patientId, fileHash);
+    const existingRecord = history.find((item) => item.file_hash === fileHash);
+    if (sessionUploadHashes.has(duplicateKey) || existingRecord) {
+      toast.info(
+        existingRecord
+          ? `File xét nghiệm này đã được upload trước đó: ${existingRecord.filename} (${formatUploadTime(existingRecord.created_at)}).`
+          : "File xét nghiệm này vừa được upload trong phiên hiện tại, hệ thống không tạo thêm bản ghi mới."
+      );
+      return;
+    }
+
     const formData = new FormData();
     formData.append("file", labFile);
     if (age) formData.append("age", age);
     formData.append("gender", gender);
+    if (selectedPatientId !== "none") formData.append("patient_id", selectedPatientId);
 
     setIsLoading(true);
     setResult(null);
@@ -281,7 +335,7 @@ export function LabResultsReader() {
         headers: { authorization: `Bearer ${token}` },
         body: formData,
       });
-      const data = await response.json();
+      const data = await readJsonResponse(response);
       if (!response.ok) {
         throw new Error(data?.detail || "Không đọc được file xét nghiệm");
       }
@@ -293,8 +347,13 @@ export function LabResultsReader() {
         gender,
         result: normalized,
       });
-      fetchUploadHistory("lab").then(setHistory);
-      toast.success("Đã đọc file xét nghiệm");
+      fetchUploadHistory("lab", patientId).then(setHistory);
+      if (normalized.duplicate?.exact) {
+        toast.info(normalized.duplicate.message || "File xét nghiệm này đã được upload trước đó.");
+      } else {
+        setSessionUploadHashes((current) => new Set(current).add(duplicateKey));
+        toast.success("Đã đọc file xét nghiệm");
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Có lỗi khi upload file xét nghiệm");
     } finally {
@@ -332,6 +391,25 @@ export function LabResultsReader() {
         <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
           <section className="rounded-lg border border-border/70 bg-background/70 p-4 shadow-sm sm:p-5">
             <div className="grid gap-4 md:grid-cols-2">
+              {medicalUser && (
+                <div className="grid gap-2 md:col-span-2">
+                  <Label>Chọn hồ sơ người bệnh</Label>
+                  <Select value={selectedPatientId} onValueChange={setSelectedPatientId}>
+                    <SelectTrigger className="w-full border border-border/70 bg-background">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Không gắn hồ sơ</SelectItem>
+                      {patients.map((patient) => (
+                        <SelectItem key={patient.id} value={String(patient.id)}>
+                          {patientDisplayName(patient)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               <div className="grid gap-2">
                 <Label htmlFor="lab-age">Tuổi</Label>
                 <Input id="lab-age" type="number" min={0} max={130} value={age} onChange={(event) => setAge(event.target.value)} placeholder="vd: 45" />
@@ -474,6 +552,21 @@ export function LabResultsReader() {
                   </Badge>
                 </div>
 
+                {result.duplicate?.exact && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-100">
+                    <div className="flex items-center gap-2 font-medium">
+                      <AlertTriangle className="h-4 w-4" />
+                      Phiếu xét nghiệm đã được lưu trước đó
+                    </div>
+                    <p className="mt-1 text-xs leading-5">
+                      {result.duplicate.message}
+                      {result.duplicate.matched_record
+                        ? ` Trùng với ${result.duplicate.matched_record.filename} (${formatUploadTime(result.duplicate.matched_record.created_at)}).`
+                        : ""}
+                    </p>
+                  </div>
+                )}
+
                 {conclusion && (
                   <div className={cn("rounded-md border p-4 text-sm", conclusion.className)}>
                     <div className="flex items-start gap-3">
@@ -581,7 +674,10 @@ export function LabResultsReader() {
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium">{item.filename}</div>
-                        <div className="text-xs text-muted-foreground">{formatUploadTime(item.created_at)}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {formatUploadTime(item.created_at)}
+                          {item.patient_id ? ` • ${patientDisplayName(patients.find((patient) => patient.id === item.patient_id))}` : ""}
+                        </div>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="outline" className="w-fit">

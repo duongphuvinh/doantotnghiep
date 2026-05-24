@@ -86,7 +86,7 @@ export function ModelEvaluation() {
     }
   };
 
-  const useImageUpload = (item: UploadHistoryItem) => {
+  const applyImageUpload = (item: UploadHistoryItem) => {
     const analysis = item.analysis as {
       prediction?: { top_label?: string | null; confidence?: number | null };
       metadata?: { body_part?: string | null; modality?: string | null };
@@ -109,7 +109,7 @@ export function ModelEvaluation() {
     toast.success("Đã nạp dự đoán từ phim xương");
   };
 
-  const useLabUpload = (item: UploadHistoryItem) => {
+  const applyLabUpload = (item: UploadHistoryItem) => {
     const analysis = item.analysis as {
       abnormal_count?: number;
       urgent_count?: number;
@@ -255,7 +255,7 @@ export function ModelEvaluation() {
                       <div className="truncate text-sm font-medium">{item.filename}</div>
                       <div className="text-xs text-muted-foreground">{formatUploadTime(item.created_at)}</div>
                     </div>
-                    <Button type="button" size="sm" variant="outline" onClick={() => useImageUpload(item)}>
+                    <Button type="button" size="sm" variant="outline" onClick={() => applyImageUpload(item)}>
                       Dùng phim này
                     </Button>
                   </div>
@@ -276,7 +276,7 @@ export function ModelEvaluation() {
                       <div className="truncate text-sm font-medium">{item.filename}</div>
                       <div className="text-xs text-muted-foreground">{formatUploadTime(item.created_at)}</div>
                     </div>
-                    <Button type="button" size="sm" variant="outline" onClick={() => useLabUpload(item)}>
+                    <Button type="button" size="sm" variant="outline" onClick={() => applyLabUpload(item)}>
                       Dùng phiếu này
                     </Button>
                   </div>

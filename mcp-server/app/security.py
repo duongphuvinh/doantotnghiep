@@ -123,8 +123,7 @@ def get_current_user(
 
 
 def ensure_patient_access(patient: dict, current_user: CurrentUser) -> None:
-    if current_user.role == "admin":
+    if current_user.role in {"admin", "clinician"}:
         return
     if int(patient["owner_user_id"]) != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot access this patient")
-

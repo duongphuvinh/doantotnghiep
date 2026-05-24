@@ -79,11 +79,14 @@ class Database:
                     CREATE TABLE IF NOT EXISTS upload_records (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        patient_id INTEGER REFERENCES patients(id) ON DELETE SET NULL,
                         upload_type TEXT NOT NULL,
                         filename TEXT NOT NULL,
                         content_type TEXT,
                         file_path TEXT,
                         file_size INTEGER,
+                        file_hash TEXT,
+                        image_hash TEXT,
                         modality TEXT,
                         body_part TEXT,
                         source_text TEXT,
@@ -94,6 +97,19 @@ class Database:
                     );
                     """
                 )
+                self._ensure_column(
+                    conn,
+                    "upload_records",
+                    "patient_id",
+                    "INTEGER REFERENCES patients(id) ON DELETE SET NULL",
+                )
+                self._ensure_column(conn, "upload_records", "file_hash", "TEXT")
+                self._ensure_column(conn, "upload_records", "image_hash", "TEXT")
+
+    def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def create_user(self, username: str, password_hash: str, full_name: str | None, role: str = "clinician") -> dict:
         with self.connect() as conn:
@@ -142,7 +158,7 @@ class Database:
 
     def list_patients(self, user_id: int, role: str) -> list[dict]:
         with self.connect() as conn:
-            if role == "admin":
+            if role in {"admin", "clinician"}:
                 rows = conn.execute("SELECT * FROM patients ORDER BY created_at DESC").fetchall()
             else:
                 rows = conn.execute(
@@ -258,11 +274,14 @@ class Database:
                 """
                 INSERT INTO upload_records (
                     owner_user_id,
+                    patient_id,
                     upload_type,
                     filename,
                     content_type,
                     file_path,
                     file_size,
+                    file_hash,
+                    image_hash,
                     modality,
                     body_part,
                     source_text,
@@ -270,15 +289,18 @@ class Database:
                     label_status,
                     usable_for_training
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_user_id,
+                    data.get("patient_id"),
                     data["upload_type"],
                     data["filename"],
                     data.get("content_type"),
                     data.get("file_path"),
                     data.get("file_size"),
+                    data.get("file_hash"),
+                    data.get("image_hash"),
                     data.get("modality"),
                     data.get("body_part"),
                     data.get("source_text"),
@@ -290,7 +312,69 @@ class Database:
             row = conn.execute("SELECT * FROM upload_records WHERE id = ?", (int(cursor.lastrowid),)).fetchone()
             return self._upload_record_from_row(row)
 
-    def list_upload_records(self, user_id: int, role: str, upload_type: str | None = None) -> list[dict]:
+    def find_upload_by_file_hash(
+        self,
+        user_id: int,
+        role: str,
+        upload_type: str,
+        patient_id: int | None,
+        file_hash: str,
+    ) -> dict | None:
+        with self.connect() as conn:
+            filters = ["upload_type = ?", "file_hash = ?"]
+            params: list[Any] = [upload_type, file_hash]
+            if patient_id is None:
+                filters.append("patient_id IS NULL")
+                if role != "admin":
+                    filters.append("owner_user_id = ?")
+                    params.append(user_id)
+            else:
+                filters.append("patient_id = ?")
+                params.append(patient_id)
+                if role not in {"admin", "clinician"}:
+                    filters.append("owner_user_id = ?")
+                    params.append(user_id)
+
+            row = conn.execute(
+                f"SELECT * FROM upload_records WHERE {' AND '.join(filters)} ORDER BY created_at DESC LIMIT 1",
+                params,
+            ).fetchone()
+            return self._upload_record_from_row(row) if row else None
+
+    def find_image_hash_candidates(
+        self,
+        user_id: int,
+        role: str,
+        patient_id: int | None,
+    ) -> list[dict]:
+        with self.connect() as conn:
+            filters = ["upload_type = 'image'", "image_hash IS NOT NULL", "image_hash != ''"]
+            params: list[Any] = []
+            if patient_id is None:
+                filters.append("patient_id IS NULL")
+                if role != "admin":
+                    filters.append("owner_user_id = ?")
+                    params.append(user_id)
+            else:
+                filters.append("patient_id = ?")
+                params.append(patient_id)
+                if role not in {"admin", "clinician"}:
+                    filters.append("owner_user_id = ?")
+                    params.append(user_id)
+
+            rows = conn.execute(
+                f"SELECT * FROM upload_records WHERE {' AND '.join(filters)} ORDER BY created_at DESC",
+                params,
+            ).fetchall()
+            return [self._upload_record_from_row(row) for row in rows]
+
+    def list_upload_records(
+        self,
+        user_id: int,
+        role: str,
+        upload_type: str | None = None,
+        patient_id: int | None = None,
+    ) -> list[dict]:
         with self.connect() as conn:
             filters: list[str] = []
             params: list[Any] = []
@@ -300,6 +384,9 @@ class Database:
             if upload_type:
                 filters.append("upload_type = ?")
                 params.append(upload_type)
+            if patient_id is not None:
+                filters.append("patient_id = ?")
+                params.append(patient_id)
 
             where = f"WHERE {' AND '.join(filters)}" if filters else ""
             rows = conn.execute(

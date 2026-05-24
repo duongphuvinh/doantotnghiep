@@ -4,7 +4,7 @@ export type MedicalUser = {
   id: number;
   username: string;
   full_name?: string | null;
-  role: "clinician" | "admin";
+  role: "patient" | "clinician" | "admin";
 };
 
 export type MedicalAuthSession = {
@@ -43,4 +43,3 @@ export function clearMedicalAuthSession() {
   localStorage.removeItem(USER_KEY);
   window.dispatchEvent(new Event("medical-auth-changed"));
 }
-
